@@ -1,0 +1,72 @@
+/* Дизайн-токены и базовый сброс. Одна точка правки цветов/отступов. */
+:root {
+  --color-bg: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-ink: #1d1f23;
+  --color-muted: #6b7280;
+  --color-line: #e3e5e8;
+  --color-primary: #b45309;
+  --color-primary-dark: #92400e;
+  --color-danger: #b91c1c;
+  --color-success: #15803d;
+  --radius: 10px;
+  --shadow: 0 1px 2px rgba(16, 24, 40, 0.06), 0 8px 24px rgba(16, 24, 40, 0.06);
+  --space: 16px;
+  --font: system-ui, -apple-system, 'Segoe UI', Roboto, Ubuntu, sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  color: var(--color-ink);
+  background: var(--color-bg);
+  line-height: 1.45;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+img {
+  max-width: 100%;
+  display: block;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 12px;
+  line-height: 1.2;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+.muted {
+  color: var(--color-muted);
+}
+
+.is-muted {
+  opacity: 0.55;
+}
