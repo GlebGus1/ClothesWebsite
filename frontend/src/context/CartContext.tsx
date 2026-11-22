@@ -1,12 +1,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import type {TShirtDto} from '../types/api';
 
 /**
  * Корзина. Важно: позиция заказа = товар (размер у товара один). Бэкенд в
  * OrderService схлопывает tshirtIds в LinkedHashSet, поэтому количество здесь не нужно —
  * дубликаты отсекаются и во фронтенде, и на сервере (проверяется на сервере!).
+ *
+ * В корзине лежат только id/название/размер/цена/обложка — их достаточно для
+ * отображения. Подойдёт как TShirtDto из каталога, так и TShirtDetailsDto со
+ * страницы товара: лишние поля структурно не мешают, а цены «из воздуха» тут
+ * нет — итог к заказу сервер считает сам по базе.
  */
-
 export interface CartItem {
   id: number;
   name: string;
@@ -19,7 +22,7 @@ const STORAGE_KEY = 'clothes.cart';
 
 interface CartContextValue {
   items: CartItem[];
-  add: (product: TShirtDto | {id: number; name: string; size: string | null; price: number | null; previewImageId: number | null}) => void;
+  add: (product: CartItem) => void;
   remove: (id: number) => void;
   clear: () => void;
   has: (id: number) => boolean;

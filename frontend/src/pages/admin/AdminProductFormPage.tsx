@@ -10,6 +10,17 @@ import {fileSize} from '../../utils/format';
 const MAX_FILES = 5;
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
+/** Главное фото ставим в начало галереи админки: сразу видно, какая картинка обложка. */
+function previewFirst(images: TShirtDetailsDto['images']) {
+  const preview = images.find((image) => image.previewImage);
+  return preview ? [preview, ...images.filter((image) => image.id !== preview.id)] : images;
+}
+
+function previewName(product: TShirtDetailsDto | null): string {
+  const preview = product?.images.find((image) => image.previewImage);
+  return preview ? preview.originalFileName : 'не выбрано';
+}
+
 const FIELD_NAMES: Record<string, string> = {
   name: 'Название',
   size: 'Размер',
@@ -35,6 +46,8 @@ export function AdminProductFormPage() {
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  /** id картинки, для которой сейчас идёт запрос (сделать главной / удалить). */
+  const [busyImageId, setBusyImageId] = useState<number | null>(null);
 
   useEffect(() => {
     if (productId === null) {
@@ -93,26 +106,39 @@ export function AdminProductFormPage() {
     }
   }
 
+  /**
+   * Смена главной картинки. Бэкенд хранит обложку в TShirt.previewImageId и отвечает
+   * обновлённой карточкой товара — берём её целиком, поэтому рамка и плашка
+   * «главное фото» переезжают сразу, без перезагрузки страницы.
+   */
   async function handleMakePreview(imageId: number) {
-    if (productId === null) {
+    if (productId === null || busyImageId !== null) {
       return;
     }
+    setBusyImageId(imageId);
     try {
       setProduct(await setPreviewImage(productId, imageId));
+      setError(null);
     } catch (err) {
       setError(toApiError(err));
+    } finally {
+      setBusyImageId(null);
     }
   }
 
   async function handleDeleteImage(imageId: number) {
-    if (productId === null || !window.confirm('Удалить изображение?')) {
+    if (productId === null || busyImageId !== null || !window.confirm('Удалить изображение?')) {
       return;
     }
+    setBusyImageId(imageId);
     try {
       await deleteImage(imageId);
       setProduct(await getTShirt(productId));
+      setError(null);
     } catch (err) {
       setError(toApiError(err));
+    } finally {
+      setBusyImageId(null);
     }
   }
 
@@ -175,21 +201,36 @@ export function AdminProductFormPage() {
       {product && product.images.length > 0 && (
         <div className='panel'>
           <h2>Галерея ({product.images.length})</h2>
+          <p className='form__hint'>
+            Главное фото видно покупателю в каталоге и первым на странице товара. Сейчас главное — «
+            {previewName(product)}»; чтобы сделать другим, нажмите «сделать главным».
+          </p>
           <div className='admin-gallery'>
-            {product.images.map((image) => (
+            {previewFirst(product.images).map((image) => (
               <figure key={image.id} className={`admin-image ${image.previewImage ? 'is-preview' : ''}`}>
                 <img src={imageUrl(image.id)} alt={image.originalFileName} loading='lazy' />
+                {image.previewImage && <span className='admin-image__flag'>главное фото</span>}
                 <figcaption>
                   <span className='muted'>
                     #{image.id} · {fileSize(image.size)}
                   </span>
                   <div className='admin-image__actions'>
                     {!image.previewImage && (
-                      <button type='button' className='btn btn--ghost btn--small' onClick={() => handleMakePreview(image.id)}>
-                        превью
+                      <button
+                        type='button'
+                        className='btn btn--ghost btn--small'
+                        onClick={() => handleMakePreview(image.id)}
+                        disabled={busyImageId !== null}
+                      >
+                        {busyImageId === image.id ? '…' : 'сделать главным'}
                       </button>
                     )}
-                    <button type='button' className='btn btn--danger btn--small' onClick={() => handleDeleteImage(image.id)}>
+                    <button
+                      type='button'
+                      className='btn btn--danger btn--small'
+                      onClick={() => handleDeleteImage(image.id)}
+                      disabled={busyImageId !== null}
+                    >
                       удалить
                     </button>
                   </div>

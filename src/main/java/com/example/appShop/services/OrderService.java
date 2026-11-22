@@ -25,6 +25,9 @@ import java.util.Set;
  * Заказы. Раньше корзина лежала в HttpSession, и заказ мог «уйти» без пользователя.
  * Теперь состав корзины приходит из запроса, а владелец определяется по токену —
  * присвоить чужой заказ невозможно.
+ *
+ * Важное правило магазина: каждая футболка существует в одном экземпляре, поэтому
+ * оформленный заказ автоматически снимает позицию с продажи (см. create).
  */
 @Service
 public class OrderService {
@@ -73,7 +76,23 @@ public class OrderService {
         order.setPhoneNumber(request.phoneNumber().trim());
         order.setOrderStatus(Order.OrderStatus.PROCESSING);
 
-        return orderMapper.toDto(orderRepository.save(order));
+        Order saved = orderRepository.save(order);
+        // Товар в единственном экземпляре: как только заказ принят, позицию нужно снять
+        // с продажи, иначе её же купит второй покупатель. Оба действия — в одной
+        // транзакции (@Transactional на методе): не было заказа — не было и списания.
+        markAsSold(tShirts);
+
+        return orderMapper.toDto(saved);
+    }
+
+    /**
+     * Снимаем купленные позиции с продажи: available = false.
+     * Товар не удаляется (он нужен истории заказа и карточке со статусом «продано»);
+     * вернуть позицию в продажу может только админ на странице товара.
+     */
+    private void markAsSold(List<TShirt> tShirts) {
+        tShirts.forEach(tShirt -> tShirt.setAvailable(false));
+        tShirtRepository.saveAll(tShirts);
     }
 
     /** «Мои заказы»: фильтруем по e-mail из токена, а не по параметру от клиента. */

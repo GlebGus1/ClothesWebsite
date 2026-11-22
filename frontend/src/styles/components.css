@@ -119,18 +119,113 @@
   border-radius: var(--radius);
   overflow: hidden;
   box-shadow: var(--shadow);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+
+/* карточка «приподнимается» над сеткой — как в маркетплейсах */
+.card:hover {
+  box-shadow: 0 2px 6px rgba(16, 24, 40, 0.1), 0 14px 30px rgba(16, 24, 40, 0.12);
+  transform: translateY(-2px);
 }
 
 .card__media {
+  position: relative;
   aspect-ratio: 3 / 4;
   background: #f3f4f6;
+}
+
+.card__link {
   display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .card__media img {
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+/*
+ * Стрелки листания фото. Сидят поверх картинки, но ССЫЛКОЙ не являются
+ * (кнопка внутри <a> была бы невалидной разметкой), поэтому клик по ним
+ * не ведёт на страницу товара.
+ *
+ * На десктопе стрелки появляются при наведении (меньше шума в сетке), на
+ * тач-устройствах наведения нет -> показываем их всегда ((hover: none)).
+ */
+.card__arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(29, 31, 35, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--color-ink);
+  font-size: 20px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s ease, background 0.15s ease;
+}
+
+.card__arrow:hover {
+  background: #fff;
+}
+
+.card__arrow:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--color-primary);
+}
+
+.card__arrow--prev {
+  left: 8px;
+}
+
+.card__arrow--next {
+  right: 8px;
+}
+
+.card__media:hover .card__arrow,
+.product__main-image:hover .card__arrow {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .card__arrow {
+    opacity: 1;
+  }
+}
+
+.card__counter {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(29, 31, 35, 0.7);
+  color: #fff;
+  font-size: 12px;
+}
+
+/* плашка «продано» поверх фото — товар купили, он больше не продаётся */
+.card__flag {
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .card__placeholder {
@@ -179,6 +274,11 @@
 .badge--muted {
   background: #eef0f2;
   color: var(--color-muted);
+}
+
+.badge--sold {
+  background: #fee2e2;
+  color: #991b1b;
 }
 
 .badge--processing {

@@ -1,4 +1,4 @@
-# Clothes Website — Spring Boot REST API + JWT + React
+npm# Clothes Website — Spring Boot REST API + JWT + React
 
 Учебный интернет-магазин футболок. Раньше это был монолит на Thymeleaf с корзиной в `HttpSession`.
 Сейчас это **два независимых приложения**:

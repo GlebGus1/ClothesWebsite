@@ -50,6 +50,8 @@ export interface TShirtDto {
   disabled: boolean;
   dateOfCreated: string | null;
   previewImageId: number | null;
+  /** id всех фото товара (главное — первым); нужны, чтобы листать галерею прямо в карточке. */
+  imageIds: number[];
 }
 
 export interface ImageDto {
@@ -62,7 +64,11 @@ export interface ImageDto {
   tShirtId: number;
 }
 
-export interface TShirtDetailsDto extends TShirtDto {
+/**
+ * Карточка товара целиком: поля списка + полные метаданные картинок (id, имя, размер).
+ * imageIds здесь не нужен: список id есть внутри images.
+ */
+export interface TShirtDetailsDto extends Omit<TShirtDto, 'imageIds'> {
   images: ImageDto[];
 }
 

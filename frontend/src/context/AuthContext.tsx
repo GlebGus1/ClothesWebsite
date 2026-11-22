@@ -9,6 +9,12 @@ import type { AuthResponse, UserDto } from '../types/api';
  * login/register/logout. Восстановление сессии: при загрузке страницы у нас
  * остались токены в localStorage -> просим /auth/me; если access-токен протух,
  * интерцептор в api/http.ts сам обновит пару токенов и повторит запрос.
+ *
+ * ВАЖНО про шапку сайта: login и register обязаны вызвать setUser. Одних токенов
+ * в localStorage недостаточно — Header (и любой компонент на useAuth) рисует имя,
+ * «Мои заказы», «Админку» и «Выйти» по состоянию React. Без setUser пользователь
+ * оставался бы «гостем» до перезагрузки страницы, которая заново читает сессию
+ * через /auth/me.
  */
 
 interface AuthContextValue {
@@ -41,6 +47,24 @@ export function AuthProvider({children}: {children: ReactNode}) {
     setUser(null);
   }, []);
 
+  /**
+   * Логин возвращает пару токенов и пользователя. Сохраняем токены (пережить
+   * перезагрузку) И обновляем состояние (шапка должна поменяться сразу, без
+   * перезагрузки и без ручного обновления контекста).
+   */
+  const login = useCallback(async (credentials: Credentials) => {
+    const session = applySession(await apiLogin(credentials));
+    setUser(session);
+    return session;
+  }, []);
+
+  /** Регистрация сразу логинит: новый пользователь видит себя в шапке. */
+  const register = useCallback(async (payload: RegisterPayload) => {
+    const session = applySession(await apiRegister(payload));
+    setUser(session);
+    return session;
+  }, []);
+
   useEffect(() => {
     const refreshToken = getRefreshToken();
     if (!refreshToken) {
@@ -68,11 +92,11 @@ export function AuthProvider({children}: {children: ReactNode}) {
     () => ({
       user,
       initializing,
-      login: async (credentials) => applySession(await apiLogin(credentials)),
-      register: async (payload) => applySession(await apiRegister(payload)),
+      login,
+      register,
       logout,
     }),
-    [user, initializing, logout],
+    [user, initializing, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

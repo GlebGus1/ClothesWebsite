@@ -180,13 +180,139 @@
   margin-bottom: 16px;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 767px) {
   .header__inner {
-    gap: 12px;
+    gap: 10px;
+    padding: 10px 12px;
+  }
+
+  /*
+   * Шапка на мобильном: первая строка — логотип и пользователь, вторая — меню
+   * полной ширины и по горизонтали скроллится (ссылок много, в том числе админка).
+   * Иначе при входе администратора меню начинало ломать переносы.
+   */
+  .nav {
+    order: 3;
+    width: 100%;
+    overflow-x: auto;
+    flex-wrap: nowrap;
+    padding-bottom: 2px;
   }
 
   .header__user {
-    margin-left: 0;
+    gap: 8px;
+  }
+
+  .header__name {
+    font-size: 13px;
+  }
+
+  .app__main {
+    padding: 16px 12px 40px;
+  }
+
+  .page__title {
+    font-size: 22px;
+    margin-bottom: 16px;
+  }
+
+  .filters {
+    padding: 12px;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .filters .field {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  /*
+   * Каталог: ДВЕ карточки в ряд. auto-fill + minmax(230px, 1fr) на узком экране
+   * даёт одну колонку («карточка на весь экран») — для маркетплейса это слишком
+   * крупно, поэтому на мобильном фиксируем две колонки и уменьшаем отступы/шрифты.
+   */
+  .grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+  }
+
+  .card__body {
+    padding: 10px;
+  }
+
+  .card__title {
+    font-size: 14px;
+    margin-bottom: 4px;
+  }
+
+  .card__meta {
+    font-size: 13px;
+  }
+
+  .card__actions {
+    padding: 0 10px 10px;
+  }
+
+  /* кнопка на всю ширину карточки — в неё проще попасть большим пальцем */
+  .card__actions .btn {
     width: 100%;
+    padding: 8px 10px;
+    font-size: 13px;
+  }
+
+  .card__arrow {
+    width: 30px;
+    height: 30px;
+    font-size: 18px;
+  }
+
+  .cart__item {
+    grid-template-columns: 64px 1fr auto;
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .cart__media img {
+    width: 64px;
+    height: 80px;
+  }
+
+  .cart__item .btn {
+    grid-column: 2 / -1;
+    justify-self: start;
+  }
+}
+
+/* самые узкие экраны (320–380px): карточки всё ещё две, но воздуха меньше */
+@media (max-width: 380px) {
+  .grid {
+    gap: 8px;
+  }
+
+  .card__body {
+    padding: 8px;
+  }
+
+  .card__title {
+    font-size: 13px;
+  }
+
+  .card__counter,
+  .card__flag {
+    font-size: 11px;
+  }
+}
+
+/* уважем системную настройку «меньше движения» */
+@media (prefers-reduced-motion: reduce) {
+  .card,
+  .card__arrow,
+  .btn {
+    transition: none;
+  }
+
+  .card:hover {
+    transform: none;
   }
 }

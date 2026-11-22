@@ -79,6 +79,17 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!--
+          H2 нужен ТОЛЬКО тестам репозиториев (@DataJpaTest): запросы JPQL проверяются
+          без запущенного MySQL. Рабочее приложение по-прежнему ходит в MySQL
+          (настройки spring.datasource.* не менялись — H2 имеет scope test).
+        -->
+        <dependency>
+            <groupId>com.h2database</groupId>
+            <artifactId>h2</artifactId>
+            <scope>test</scope>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-devtools</artifactId>

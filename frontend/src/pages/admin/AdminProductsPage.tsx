@@ -94,7 +94,9 @@ export function AdminProductsPage() {
                   ) : product.available ? (
                     <span className='badge badge--delivered'>в продаже</span>
                   ) : (
-                    <span className='badge badge--canceled'>нет в наличии</span>
+                    // available=false — либо вещь купили (OrderService сам снимает с продажи),
+                    // либо её снял админ галочкой в форме товара
+                    <span className='badge badge--sold'>не продаётся</span>
                   )}
                 </td>
                 <td className='table__actions'>

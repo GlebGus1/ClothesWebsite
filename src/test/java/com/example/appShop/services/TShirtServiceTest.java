@@ -1,6 +1,8 @@
 package com.example.appShop.services;
 
+import com.example.appShop.dto.ImageDto;
 import com.example.appShop.dto.TShirtDetailsDto;
+import com.example.appShop.dto.TShirtDto;
 import com.example.appShop.dto.TShirtFormRequest;
 import com.example.appShop.entities.Image;
 import com.example.appShop.entities.TShirt;
@@ -9,6 +11,7 @@ import com.example.appShop.exceptions.NotFoundException;
 import com.example.appShop.mapper.TShirtMapper;
 import com.example.appShop.repositories.ImageRepository;
 import com.example.appShop.repositories.TShirtRepository;
+import com.example.appShop.repositories.projection.ImageIdProjection;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
@@ -114,6 +117,47 @@ class TShirtServiceTest {
         assertThat(tShirtService.search("M", true, "price_asc", 0, 12, false).getContent())
                 .singleElement()
                 .satisfies(dto -> assertThat(dto.id()).isEqualTo(1L));
+    }
+
+    @Test
+    void searchReturnsGalleryIdsWithPreviewFirst() {
+        TShirt tShirt = shirt(1L, false);
+        tShirt.setPreviewImageId(12);
+        when(tShirtRepository.findAll(any(Specification.class), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(tShirt)));
+        when(imageRepository.findImageIdsOfProducts(List.of(1L)))
+                .thenReturn(List.of(new ImageRow(1L, 10), new ImageRow(1L, 12)));
+
+        TShirtDto dto = tShirtService.search(null, null, null, 0, 12, false).getContent().get(0);
+
+        // карточка в каталоге листает фото прямо в списке: id всех картинок идут в DTO,
+        // а обложка — первой, чтобы нулевой слайд совпадал с главным фото
+        assertThat(dto.previewImageId()).isEqualTo(12);
+        assertThat(dto.imageIds()).containsExactly(12L, 10L);
+    }
+
+    @Test
+    void emptyCatalogPageDoesNotQueryImagesAtAll() {
+        when(tShirtRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
+
+        tShirtService.search(null, null, null, 0, 12, false);
+
+        // «where id in ()» база не понимает, поэтому лишний запрос не отправляем
+        verify(imageRepository, never()).findImageIdsOfProducts(anyList());
+    }
+
+    @Test
+    void cardMarksExactlyOneImageAsPreview() {
+        TShirt tShirt = shirt(9L, false);
+        tShirt.setPreviewImageId(55);
+        when(tShirtRepository.findById(9L)).thenReturn(Optional.of(tShirt));
+        when(imageRepository.findAllByTShirt(9L)).thenReturn(List.of(image(50L, tShirt), image(55L, tShirt)));
+
+        TShirtDetailsDto dto = tShirtService.getDetails(9L);
+
+        // флаг «главное фото» считаем из tshirts.preview_image_id, а не из устаревшей колонки
+        assertThat(dto.images()).filteredOn(ImageDto::previewImage)
+                .extracting(ImageDto::id).containsExactly(55L);
     }
 
     @Test
@@ -273,6 +317,35 @@ class TShirtServiceTest {
         tShirtService.setPreviewImage(7L, 55L);
 
         assertThat(tShirt.getPreviewImageId()).isEqualTo(55);
+    }
+
+    @Test
+    void setPreviewReturnsGalleryWithNewCoverHighlighted() {
+        TShirt tShirt = shirt(7L, false);
+        tShirt.setPreviewImageId(50);
+        when(tShirtRepository.findById(7L)).thenReturn(Optional.of(tShirt));
+        when(imageRepository.findById(55L)).thenReturn(Optional.of(image(55L, tShirt)));
+        when(imageRepository.findAllByTShirt(7L)).thenReturn(List.of(image(50L, tShirt), image(55L, tShirt)));
+
+        TShirtDetailsDto dto = tShirtService.setPreviewImage(7L, 55L);
+
+        assertThat(dto.previewImageId()).isEqualTo(55);
+        assertThat(dto.images()).filteredOn(ImageDto::previewImage)
+                .extracting(ImageDto::id).containsExactly(55L);
+    }
+
+    /** Тестовая замена проекции ImageIdProjection (Spring Data собирает её из запроса). */
+    private record ImageRow(long productId, long imageId) implements ImageIdProjection {
+
+        @Override
+        public long getProductId() {
+            return productId;
+        }
+
+        @Override
+        public long getImageId() {
+            return imageId;
+        }
     }
 
     private static Image image(long id, TShirt tShirt) {

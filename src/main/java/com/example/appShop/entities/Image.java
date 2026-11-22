@@ -13,6 +13,11 @@ public class Image {
     private String originalFileName;
     private Long size;
     private String contentType;
+    /**
+     * Наследие старой Thymeleaf-версии: колонка осталась в базе, но флаг больше не
+     * используется — главное фото хранится в tshirts.preview_image_id (одна ссылка на
+     * картинку вместо двух, которые могут разойтись).
+     */
     private boolean isPreviewImage;
     @Lob
     @Column(name = "bytes", columnDefinition = "longblob")

@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -138,6 +139,22 @@ class OrderServiceTest {
     }
 
     @Test
+    void purchasedProductsAreTakenOffSale() {
+        TShirt first = shirt(1L, true, false);
+        TShirt second = shirt(2L, true, false);
+        when(userService.getByEmailOrThrow("buyer@example.com")).thenReturn(user());
+        when(tShirtRepository.findAllById(any())).thenReturn(List.of(first, second));
+        when(orderRepository.save(any())).thenAnswer(inv -> withId(inv.getArgument(0), 80L));
+
+        orderService.create(cart(List.of(1L, 2L)), buyer());
+
+        // вещи в единственном экземпляре: после заказа обе позиции больше не продаются
+        assertThat(first.isAvailable()).isFalse();
+        assertThat(second.isAvailable()).isFalse();
+        verify(tShirtRepository).saveAll(List.of(first, second));
+    }
+
+    @Test
     void soldOutProductStopsOrderAndNamesIt() {
         when(userService.getByEmailOrThrow("buyer@example.com")).thenReturn(user());
         when(tShirtRepository.findAllById(any())).thenReturn(List.of(shirt(1L, false, false)));
@@ -145,6 +162,10 @@ class OrderServiceTest {
         assertThatExceptionOfType(InvalidRequestException.class)
                 .isThrownBy(() -> orderService.create(cart(List.of(1L)), buyer()))
                 .withMessageContaining("Футболка 1");
+
+        // «нет в наличии» — заказ не создаём и списывать с продажи нечего
+        verify(orderRepository, never()).save(any());
+        verify(tShirtRepository, never()).saveAll(any());
     }
 
     @Test

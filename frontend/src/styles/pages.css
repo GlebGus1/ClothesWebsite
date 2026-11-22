@@ -122,6 +122,7 @@
 }
 
 .product__main-image {
+  position: relative; /* для стрелок и счётчика поверх большого фото */
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius);
@@ -215,6 +216,7 @@
 }
 
 .admin-image {
+  position: relative;
   margin: 0;
   border: 1px solid var(--color-line);
   border-radius: var(--radius);
@@ -222,8 +224,22 @@
   background: #fff;
 }
 
+/* текущая обложка товара: заметная рамка + плашка «главное фото» */
 .admin-image.is-preview {
   border-color: var(--color-primary);
+  box-shadow: 0 0 0 2px var(--color-primary);
+}
+
+.admin-image__flag {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .admin-image img {

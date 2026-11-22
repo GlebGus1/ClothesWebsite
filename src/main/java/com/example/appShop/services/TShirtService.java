@@ -9,6 +9,7 @@ import com.example.appShop.exceptions.NotFoundException;
 import com.example.appShop.mapper.TShirtMapper;
 import com.example.appShop.repositories.ImageRepository;
 import com.example.appShop.repositories.TShirtRepository;
+import com.example.appShop.repositories.projection.ImageIdProjection;
 import com.example.appShop.specification.TShirtSpecifications;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -17,7 +18,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Каталог футболок: поиск с фильтрами, карточка, CRUD для админа, картинки.
@@ -49,9 +54,11 @@ public class TShirtService {
                                   int page, int pageSize, boolean includeDisabled) {
         Pageable pageable = PageRequest.of(Math.max(page, 0), clampPageSize(pageSize),
                 TShirtSort.from(sort).toSort());
-        return tShirtRepository
-                .findAll(TShirtSpecifications.byFilters(size, available, includeDisabled), pageable)
-                .map(tShirtMapper::toDto);
+        Page<TShirt> found = tShirtRepository
+                .findAll(TShirtSpecifications.byFilters(size, available, includeDisabled), pageable);
+
+        Map<Long, List<Long>> galleries = imageIdsByProduct(found.getContent());
+        return found.map(tShirt -> tShirtMapper.toDto(tShirt, galleries.getOrDefault(tShirt.getId(), List.of())));
     }
 
     @Transactional(readOnly = true)
@@ -146,6 +153,42 @@ public class TShirtService {
         return tShirtRepository.findById(id)
                 .filter(tShirt -> !tShirt.isDisabled())
                 .orElseThrow(() -> new NotFoundException("Футболка", id));
+    }
+
+    /**
+     * Id всех картинок страницы каталога одним запросом (а не «по запросу на карточку»)
+     * и без longblob: проекция ImageIdProjection тянет из базы только числа.
+     * Внутри списка главное фото ставим первым — карточка открывает листание с обложки.
+     */
+    private Map<Long, List<Long>> imageIdsByProduct(List<TShirt> tShirts) {
+        if (tShirts.isEmpty()) {
+            return Map.of();
+        }
+        List<Long> productIds = tShirts.stream().map(TShirt::getId).toList();
+
+        Map<Long, List<Long>> imageIds = new HashMap<>();
+        for (ImageIdProjection row : imageRepository.findImageIdsOfProducts(productIds)) {
+            imageIds.computeIfAbsent(row.getProductId(), id -> new ArrayList<>()).add(row.getImageId());
+        }
+
+        Map<Long, List<Long>> ordered = new LinkedHashMap<>();
+        for (TShirt tShirt : tShirts) {
+            List<Long> ids = imageIds.get(tShirt.getId());
+            if (ids != null) {
+                ordered.put(tShirt.getId(), withPreviewFirst(ids, tShirt.getPreviewImageId()));
+            }
+        }
+        return ordered;
+    }
+
+    private List<Long> withPreviewFirst(List<Long> ids, int previewImageId) {
+        int index = ids.indexOf((long) previewImageId);
+        if (index <= 0) {
+            return List.copyOf(ids);
+        }
+        List<Long> reordered = new ArrayList<>(ids);
+        reordered.add(0, reordered.remove(index));
+        return List.copyOf(reordered);
     }
 
     private void applyForm(TShirt tShirt, TShirtFormRequest form) {

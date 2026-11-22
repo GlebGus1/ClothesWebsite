@@ -1,14 +1,21 @@
 import {useEffect, useState} from 'react';
-import {Link, useNavigate, useParams} from 'react-router-dom';
+import {useNavigate, useParams} from 'react-router-dom';
 import {getTShirt} from '../api/catalog';
 import {ApiRequestError, imageUrl, toApiError, type ApiRequestError as ApiError} from '../api/http';
 import {ApiErrorBox} from '../components/ApiErrorBox';
 import {Spinner} from '../components/Spinner';
 import {useCart} from '../context/CartContext';
-import type {TShirtDetailsDto} from '../types/api';
+import type {ImageDto, TShirtDetailsDto} from '../types/api';
 import {dateTime, money} from '../utils/format';
 
-/** Страница товара: галерея + характеристики + кнопка «в корзину». */
+/**
+ * Страница товара: галерея (стрелки + миниатюры + стрелки клавиатуры),
+ * характеристики и кнопка «в корзину».
+ *
+ * Порядок картинок один и тот же везде: главное фото (previewImageId) первым,
+ * остальные — по id. Совпадает с каталожной карточкой, поэтому «листать фото»
+ * можно и из списка, и здесь.
+ */
 export function ProductPage() {
   const {id} = useParams<{id: string}>();
   const productId = Number(id);
@@ -32,13 +39,30 @@ export function ProductPage() {
       .catch((err) => setError(toApiError(err)));
   }, [productId]);
 
+  // листание с клавиатуры: ← / → (активно, только когда фото действительно больше одного)
+  useEffect(() => {
+    const loaded = product;
+    if (!loaded || loaded.images.length < 2) {
+      return;
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+        return;
+      }
+      const step = event.key === 'ArrowLeft' ? -1 : 1;
+      setActiveImage((current) => nextImageId(loaded, current, step));
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [product]);
+
   if (error && !product) {
     return (
       <section className='page'>
         <ApiErrorBox error={error} />
-        <Link className='btn btn--ghost' to='/catalog'>
+        <button type='button' className='btn btn--ghost' onClick={() => navigate('/catalog')}>
           ← в каталог
-        </Link>
+        </button>
       </section>
     );
   }
@@ -47,7 +71,16 @@ export function ProductPage() {
     return <Spinner />;
   }
 
-  const shown = activeImage ?? product.previewImageId;
+  const gallery = previewFirst(product.images, product.previewImageId);
+  const position = Math.max(
+    0,
+    gallery.findIndex((image) => image.id === (activeImage ?? product.previewImageId)),
+  );
+  const shown = gallery[position]?.id ?? null;
+
+  const shift = (step: number) => {
+    setActiveImage((current) => nextImageId(product, current, step));
+  };
 
   return (
     <section className='page product'>
@@ -59,14 +92,29 @@ export function ProductPage() {
         <div className='product__gallery'>
           <div className='product__main-image'>
             {shown ? <img src={imageUrl(shown)} alt={product.name} /> : <span className='card__placeholder'>нет фото</span>}
+
+            {gallery.length > 1 && (
+              <>
+                <button type='button' className='card__arrow card__arrow--prev' onClick={() => shift(-1)} aria-label='Предыдущее фото'>
+                  <span aria-hidden='true'>‹</span>
+                </button>
+                <button type='button' className='card__arrow card__arrow--next' onClick={() => shift(1)} aria-label='Следующее фото'>
+                  <span aria-hidden='true'>›</span>
+                </button>
+                <span className='card__counter'>
+                  {position + 1}/{gallery.length}
+                </span>
+              </>
+            )}
           </div>
-          {product.images.length > 1 && (
+
+          {gallery.length > 1 && (
             <div className='product__thumbs'>
-              {product.images.map((image) => (
+              {gallery.map((image, index) => (
                 <button
                   key={image.id}
                   type='button'
-                  className={`thumb ${shown === image.id ? 'is-active' : ''}`}
+                  className={`thumb ${index === position ? 'is-active' : ''}`}
                   onClick={() => setActiveImage(image.id)}
                   title={image.originalFileName}
                 >
@@ -78,7 +126,10 @@ export function ProductPage() {
         </div>
 
         <div className='product__info'>
-          <h1 className='page__title'>{product.name}</h1>
+          <h1 className='page__title'>
+            {product.name}
+            {!product.available && <span className='badge badge--sold'>продано</span>}
+          </h1>
           <p className='product__price'>{money(product.price)}</p>
           <ul className='product__facts'>
             <li>
@@ -87,7 +138,7 @@ export function ProductPage() {
             </li>
             <li>
               <span>Наличие</span>
-              <b>{product.available ? 'в наличии' : 'нет в наличии'}</b>
+              <b>{product.available ? 'в наличии' : 'продано'}</b>
             </li>
             <li>
               <span>Добавлен</span>
@@ -101,10 +152,32 @@ export function ProductPage() {
               {has(product.id) ? 'уже в корзине ✓' : 'добавить в корзину'}
             </button>
           ) : (
-            <p className='badge badge--muted'>товара нет в наличии</p>
+            <p className='badge badge--sold'>эта вещь уже продана — у нас каждый экземпляр поштучно</p>
           )}
         </div>
       </div>
     </section>
   );
+}
+
+/** Главное фото — первым; дальше по id (как их отдаёт бэкенд). */
+function previewFirst(images: ImageDto[], previewImageId: number | null): ImageDto[] {
+  const preview = images.find((image) => image.id === previewImageId);
+  if (!preview) {
+    return images;
+  }
+  return [preview, ...images.filter((image) => image.id !== preview.id)];
+}
+
+/** Следующее фото по кругу (листание «зациклено», как в витринах маркетплейсов). */
+function nextImageId(product: TShirtDetailsDto, currentId: number | null, step: number): number | null {
+  const gallery = previewFirst(product.images, product.previewImageId);
+  if (gallery.length < 2) {
+    return currentId;
+  }
+  const index = Math.max(
+    0,
+    gallery.findIndex((image) => image.id === (currentId ?? product.previewImageId)),
+  );
+  return gallery[(index + step + gallery.length) % gallery.length].id;
 }

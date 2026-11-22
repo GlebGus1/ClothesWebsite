@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Смоук-тест REST API (18 проверок: гость / USER / ADMIN, JWT, refresh, права, загрузка файлов).
+# Смоук-тест REST API (сценарии 1–18: гость / USER / ADMIN, JWT, refresh, права,
+# загрузка и проверка файлов, заказ и «товар снят с продажи после покупки»).
 # Требуется запущенный бэкенд на http://localhost:8080:
 #   bash scripts/mvn.sh spring-boot:run -Dspring-boot.run.arguments="--app.admin.email=admin@clothes.shop --app.admin.password=SuperSecret123"
 #   bash scripts/smoke-test.sh
@@ -88,10 +89,32 @@ SHIRT_ID=$(json "$TMP/created" id)
 IMAGE_ID=$(json "$TMP/created" images.0.id)
 note "товар id=$SHIRT_ID, картинка id=$IMAGE_ID"
 
+echo "== 11b. ADMIN меняет главное фото (PATCH /api/tshirts/{id}/preview/{imageId}) =="
+node -e "require('fs').writeFileSync(require('path').resolve(process.argv[1]), Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==','base64'))" "$(cygpath -w "$TMP/shirt2.png" 2>/dev/null || echo "$TMP/shirt2.png")"
+check 200 -X PUT "$API/api/tshirts/$SHIRT_ID" -H "Authorization: Bearer $ADMIN_ACCESS" \
+  -F "data={\"name\":\"Smoke T-Shirt $STAMP\",\"description\":\"smoke test product\",\"size\":\"M\",\"price\":799.5,\"available\":true};type=application/json" \
+  -F "files=@$(cygpath -w "$TMP/shirt2.png" 2>/dev/null || echo "$TMP/shirt2.png");type=image/png" > "$TMP/updated"
+SECOND_IMAGE_ID=$(node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const other=d.images.find(i=>i.id!==Number(process.argv[2]));console.log(other?other.id:'')" "$TMP/updated" "$IMAGE_ID")
+check 200 -X PATCH "$API/api/tshirts/$SHIRT_ID/preview/$SECOND_IMAGE_ID" -H "Authorization: Bearer $ADMIN_ACCESS" > "$TMP/preview"
+if node -e "const fs=require('fs');const d=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const flagged=d.images.filter(i=>i.previewImage);process.exit(d.previewImageId===Number(process.argv[2])&&flagged.length===1&&flagged[0].id===Number(process.argv[2])?0:1)" "$TMP/preview" "$SECOND_IMAGE_ID"; then
+  ok "главное фото переключилось: previewImageId=$SECOND_IMAGE_ID, флаг только у него"
+else
+  fail "после PATCH preview разошлись flags: ждали previewImageId=$SECOND_IMAGE_ID"
+  head -c 400 "$TMP/preview" >&2; echo >&2
+fi
+
 echo "== 12. Карточка и картинка доступны гостю =="
 check 200 "$API/api/tshirts/$SHIRT_ID" >/dev/null
 check 200 "$API/api/images/$IMAGE_ID" >/dev/null
 check 200 "$API/api/tshirts?size=M&sort=price_asc&pageSize=5" >/dev/null
+# карточка в каталоге умеет листать фото, потому что бэкенд приносит imageIds,
+# где первым идёт главное фото
+check 200 "$API/api/tshirts?pageSize=100" > "$TMP/list"
+if node -e "const fs=require('fs');const page=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));const item=page.content.find(t=>t.id===Number(process.argv[2]));const ids=(item&&item.imageIds)||[];process.exit(ids.length>0&&ids[0]===Number(process.argv[3])?0:1)" "$TMP/list" "$SHIRT_ID" "$SECOND_IMAGE_ID"; then
+  ok "в списке каталога есть imageIds, главное фото — первым"
+else
+  fail "список каталога не принёс imageIds для товара $SHIRT_ID"
+fi
 check 400 -X POST "$API/api/tshirts" -H "Authorization: Bearer $ADMIN_ACCESS" \
   -F "data={\"name\":\"\",\"size\":\"M\",\"price\":10};type=application/json" >/dev/null
 
@@ -109,7 +132,17 @@ check 201 -X POST "$API/api/orders" -H "Authorization: Bearer $USER_ACCESS" -H '
 ORDER_ID=$(json "$TMP/order" id)
 note "заказ #${ORDER_ID} статус=$(json "$TMP/order" status) позиций=$(json "$TMP/order" items.length)"
 
-echo "== 14. Заказ с несуществующим товаром -> 404, пустая корзина -> 400 =="
+echo "== 14. Купленный товар снят с продажи: повторный заказ той же футболки -> 400 =="
+check 400 -X POST "$API/api/orders" -H "Authorization: Bearer $USER_ACCESS" -H 'Content-Type: application/json' \
+  -d "{\"nameOfUser\":\"Test User\",\"postOffice\":\"Post office 12\",\"postalCode\":\"01001\",\"phoneNumber\":\"+380631234567\",\"tshirtIds\":[$SHIRT_ID]}" >/dev/null
+check 200 "$API/api/tshirts?available=true&pageSize=100" > "$TMP/available"
+if grep -qE "\"id\":$SHIRT_ID[,}]" "$TMP/available"; then
+  fail "купленный товар всё ещё доступен в каталоге (available=true)"
+else
+  ok "купленный товар исчез из каталога: available=false"
+fi
+
+echo "== 14b. Заказ с несуществующим товаром -> 404, пустая корзина -> 400 =="
 check 404 -X POST "$API/api/orders" -H "Authorization: Bearer $USER_ACCESS" -H 'Content-Type: application/json' \
   -d "{\"nameOfUser\":\"Test User\",\"postOffice\":\"Post office 12\",\"postalCode\":\"01001\",\"phoneNumber\":\"+380631234567\",\"tshirtIds\":[999999]}" >/dev/null
 check 400 -X POST "$API/api/orders" -H "Authorization: Bearer $USER_ACCESS" -H 'Content-Type: application/json' \
