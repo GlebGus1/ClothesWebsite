@@ -3,6 +3,7 @@ package com.example.appShop.services;
 import com.example.appShop.dto.CreateOrderRequest;
 import com.example.appShop.dto.OrderDto;
 import com.example.appShop.entities.Order;
+import com.example.appShop.entities.PromoCode;
 import com.example.appShop.entities.TShirt;
 import com.example.appShop.entities.User;
 import com.example.appShop.exceptions.InvalidRequestException;
@@ -38,15 +39,18 @@ public class OrderService {
     private final TShirtRepository tShirtRepository;
     private final UserService userService;
     private final OrderMapper orderMapper;
+    private final PromoCodeService promoCodeService;
 
     public OrderService(OrderRepository orderRepository,
                         TShirtRepository tShirtRepository,
                         UserService userService,
-                        OrderMapper orderMapper) {
+                        OrderMapper orderMapper,
+                        PromoCodeService promoCodeService) {
         this.orderRepository = orderRepository;
         this.tShirtRepository = tShirtRepository;
         this.userService = userService;
         this.orderMapper = orderMapper;
+        this.promoCodeService = promoCodeService;
     }
 
     @Transactional
@@ -75,6 +79,17 @@ public class OrderService {
         order.setPostalCode(request.postalCode().trim());
         order.setPhoneNumber(request.phoneNumber().trim());
         order.setOrderStatus(Order.OrderStatus.PROCESSING);
+
+        // Промокод проверяем на сервере: он должен существовать, быть активным и
+        // не просроченным. Пустой код — просто null (скидки нет), а вот неверный код
+        // показываем покупателю ошибкой, а не «молча» считаем полную сумму.
+        PromoCode promoCode = promoCodeService.resolveOrNull(request.promoCode());
+        if (promoCode != null) {
+            // В заказ кладём строку-«слепок»: код и процент на момент покупки. Заказ
+            // не должен меняться, если админ позже выключит, переименует или удалит код.
+            order.setPromoCode(promoCode.getCode());
+            order.setDiscountPercent(promoCode.getDiscountPercent());
+        }
 
         Order saved = orderRepository.save(order);
         // Товар в единственном экземпляре: как только заказ принят, позицию нужно снять

@@ -4,7 +4,10 @@ import com.example.appShop.dto.AuthRequest;
 import com.example.appShop.dto.AuthResponse;
 import com.example.appShop.dto.RefreshRequest;
 import com.example.appShop.dto.RegisterRequest;
+import com.example.appShop.dto.SendCodeRequest;
 import com.example.appShop.dto.UserDto;
+import com.example.appShop.dto.VerificationStatusDto;
+import com.example.appShop.dto.VerifyEmailRequest;
 import com.example.appShop.mapper.UserMapper;
 import com.example.appShop.security.UserPrincipal;
 import com.example.appShop.services.AuthService;
@@ -20,10 +23,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Всё, что связано с входом. Публичные ручки: register / login / refresh.
+ * Всё, что связано с входом. Публичные ручки: register / verify-email /
+ * verification-code / login / refresh.
  * Приватные: me / logout (нужен валидный access-токен).
  *
- * Нигде не создаётся сессия и не ставится кука — ответ всегда JSON с двумя токенами.
+ * Нигде не создаётся сессия и не ставится кука — ответ всегда JSON с двумя токенами
+ * (кроме register/verification-code: там токенов нет, пока e-mail не подтверждён).
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -37,9 +42,25 @@ public class AuthController {
         this.userService = userService;
     }
 
+    /**
+     * Регистрация создаёт неподтверждённый аккаунт и отправляет PIN-код.
+     * Токенов в ответе нет — их выдаст /api/auth/verify-email.
+     */
     @PostMapping("/register")
-    public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request) {
+    public ResponseEntity<VerificationStatusDto> register(@Valid @RequestBody RegisterRequest request) {
         return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    }
+
+    /** Ввод PIN-кода из письма. Успех = аккаунт активирован + сразу выдаются токены. */
+    @PostMapping("/verify-email")
+    public AuthResponse verifyEmail(@Valid @RequestBody VerifyEmailRequest request) {
+        return authService.verifyEmail(request);
+    }
+
+    /** «Код не пришёл» — генерируем и отправляем новый PIN-код. */
+    @PostMapping("/verification-code")
+    public VerificationStatusDto resendCode(@Valid @RequestBody SendCodeRequest request) {
+        return authService.resendVerificationCode(request);
     }
 
     @PostMapping("/login")

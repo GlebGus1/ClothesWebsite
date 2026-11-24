@@ -3,6 +3,7 @@ package com.example.appShop.services;
 import com.example.appShop.dto.CreateOrderRequest;
 import com.example.appShop.dto.OrderDto;
 import com.example.appShop.entities.Order;
+import com.example.appShop.entities.PromoCode;
 import com.example.appShop.entities.TShirt;
 import com.example.appShop.entities.User;
 import com.example.appShop.exceptions.InvalidRequestException;
@@ -48,6 +49,8 @@ class OrderServiceTest {
     private TShirtRepository tShirtRepository;
     @Mock
     private UserService userService;
+    @Mock
+    private PromoCodeService promoCodeService;
 
     @InjectMocks
     private OrderService orderService;
@@ -78,7 +81,20 @@ class OrderServiceTest {
     }
 
     private static CreateOrderRequest cart(List<Long> ids) {
-        return new CreateOrderRequest(" Иван Петров ", " Отделение 12 ", " 01001 ", " +380631234567 ", ids);
+        return new CreateOrderRequest(" Иван Петров ", " Отделение 12 ", " 01001 ", " +380631234567 ", ids, null);
+    }
+
+    private static CreateOrderRequest cart(List<Long> ids, String promoCode) {
+        return new CreateOrderRequest("Иван Петров", "Отделение 12", "01001", "+380631234567", ids, promoCode);
+    }
+
+    private static PromoCode promo(String code, int percent) {
+        PromoCode promoCode = new PromoCode();
+        promoCode.setId(1L);
+        promoCode.setCode(code);
+        promoCode.setDiscountPercent(percent);
+        promoCode.setActive(true);
+        return promoCode;
     }
 
     @Test
@@ -175,6 +191,52 @@ class OrderServiceTest {
 
         assertThatExceptionOfType(InvalidRequestException.class)
                 .isThrownBy(() -> orderService.create(cart(List.of(1L)), buyer()));
+    }
+
+    @Test
+    void orderKeepsPromoCodeSnapshotAndDiscount() {
+        when(userService.getByEmailOrThrow("buyer@example.com")).thenReturn(user());
+        when(tShirtRepository.findAllById(any())).thenReturn(List.of(shirt(1L, true, false)));
+        when(promoCodeService.resolveOrNull("SALE10")).thenReturn(promo("SALE10", 10));
+        when(orderRepository.save(any())).thenAnswer(inv -> withId(inv.getArgument(0), 90L));
+
+        OrderDto dto = orderService.create(cart(List.of(1L), "SALE10"), buyer());
+
+        ArgumentCaptor<Order> saved = ArgumentCaptor.forClass(Order.class);
+        verify(orderRepository).save(saved.capture());
+        // в заказе — строка-«слепок»: даже если админ удалит промокод, скидка останется видна
+        assertThat(saved.getValue().getPromoCode()).isEqualTo("SALE10");
+        assertThat(saved.getValue().getDiscountPercent()).isEqualTo(10);
+
+        // цену заказа (199.00) пересчитал сервер: скидка 10% = 19.90, к оплате 179.10
+        assertThat(dto.discountAmount()).isEqualTo(19.90);
+        assertThat(dto.total()).isEqualTo(179.10);
+    }
+
+    @Test
+    void orderWithoutPromoCodeHasNoDiscount() {
+        when(userService.getByEmailOrThrow("buyer@example.com")).thenReturn(user());
+        when(tShirtRepository.findAllById(any())).thenReturn(List.of(shirt(1L, true, false)));
+        when(orderRepository.save(any())).thenAnswer(inv -> withId(inv.getArgument(0), 91L));
+
+        OrderDto dto = orderService.create(cart(List.of(1L)), buyer());
+
+        verify(promoCodeService).resolveOrNull(null);
+        assertThat(dto.promoCode()).isNull();
+        assertThat(dto.discountPercent()).isZero();
+        assertThat(dto.discountAmount()).isZero();
+        assertThat(dto.total()).isEqualTo(199.00);
+    }
+
+    @Test
+    void badPromoCodeStopsOrder() {
+        when(userService.getByEmailOrThrow("buyer@example.com")).thenReturn(user());
+        when(tShirtRepository.findAllById(any())).thenReturn(List.of(shirt(1L, true, false)));
+        when(promoCodeService.resolveOrNull("EXPIRED")).thenThrow(new InvalidRequestException("Срок действия истёк"));
+
+        assertThatExceptionOfType(InvalidRequestException.class)
+                .isThrownBy(() -> orderService.create(cart(List.of(1L), "EXPIRED"), buyer()));
+        verify(orderRepository, never()).save(any());
     }
 
     @Test

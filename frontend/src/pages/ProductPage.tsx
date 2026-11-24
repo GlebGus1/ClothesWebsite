@@ -3,6 +3,8 @@ import {useNavigate, useParams} from 'react-router-dom';
 import {getTShirt} from '../api/catalog';
 import {ApiRequestError, imageUrl, toApiError, type ApiRequestError as ApiError} from '../api/http';
 import {ApiErrorBox} from '../components/ApiErrorBox';
+import {FavoriteButton} from '../components/FavoriteButton';
+import {FavoritesNotice} from '../components/FavoritesNotice';
 import {Spinner} from '../components/Spinner';
 import {useCart} from '../context/CartContext';
 import type {ImageDto, TShirtDetailsDto} from '../types/api';
@@ -76,7 +78,6 @@ export function ProductPage() {
     0,
     gallery.findIndex((image) => image.id === (activeImage ?? product.previewImageId)),
   );
-  const shown = gallery[position]?.id ?? null;
 
   const shift = (step: number) => {
     setActiveImage((current) => nextImageId(product, current, step));
@@ -88,10 +89,35 @@ export function ProductPage() {
         ← в каталог
       </button>
 
+      <FavoritesNotice />
+
       <div className='product__layout'>
         <div className='product__gallery'>
           <div className='product__main-image'>
-            {shown ? <img src={imageUrl(shown)} alt={product.name} /> : <span className='card__placeholder'>нет фото</span>}
+            {gallery.length > 0 ? (
+              // Листание ПЛАВНОЕ (как в карточке каталога): все фото стоят в один ряд
+              // внутри .product__viewport, а смена активного фото сдвигает ряд на
+              // translateX(-N*100%); transition 300ms ease-in-out дорисовывает переход.
+              <div className='product__viewport'>
+                <div className='product__track' style={{transform: `translateX(-${position * 100}%)`}}>
+                  {gallery.map((image, slide) => (
+                    <div className='product__slide' key={image.id}>
+                      <img
+                        src={imageUrl(image.id)}
+                        alt={`${product.name}, фото ${slide + 1} из ${gallery.length}`}
+                        loading='lazy'
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <span className='card__placeholder'>нет фото</span>
+            )}
+
+            {/* сердечко: состояние берётся из FavoritesContext — одно и то же избранное
+                в каталоге, здесь и во вкладке «Избранное» в профиле */}
+            <FavoriteButton tshirtId={product.id} className='fav--overlay' />
 
             {gallery.length > 1 && (
               <>

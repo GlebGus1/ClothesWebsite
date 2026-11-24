@@ -1,6 +1,6 @@
 import {useEffect, useRef, useState, type FormEvent} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
-import {deleteImage, getTShirt, saveTShirt, setPreviewImage} from '../../api/catalog';
+import {deleteImage, getTShirtForAdmin, restoreTShirt, saveTShirt, setPreviewImage} from '../../api/catalog';
 import {ApiRequestError, imageUrl, toApiError, type ApiRequestError as ApiError} from '../../api/http';
 import {ApiErrorBox} from '../../components/ApiErrorBox';
 import {Spinner} from '../../components/Spinner';
@@ -53,7 +53,9 @@ export function AdminProductFormPage() {
     if (productId === null) {
       return;
     }
-    getTShirt(productId)
+    // ВАЖНО: берём «админскую» ручку. Публичный GET /tshirts/{id} прячет скрытые
+    // товары (is_disabled=true), и форма скрытой позиции падала бы с 404.
+    getTShirtForAdmin(productId)
       .then(setProduct)
       .catch((err) => setError(toApiError(err)));
   }, [productId]);
@@ -133,12 +135,28 @@ export function AdminProductFormPage() {
     setBusyImageId(imageId);
     try {
       await deleteImage(imageId);
-      setProduct(await getTShirt(productId));
+      setProduct(await getTShirtForAdmin(productId));
       setError(null);
     } catch (err) {
       setError(toApiError(err));
     } finally {
       setBusyImageId(null);
+    }
+  }
+
+  async function handleRestore() {
+    if (productId === null || busy) {
+      return;
+    }
+    setBusy(true);
+    try {
+      // сервер ставит is_disabled=false и available=true: товар снова в каталоге
+      setProduct(await restoreTShirt(productId));
+      setError(null);
+    } catch (err) {
+      setError(toApiError(err));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -148,8 +166,23 @@ export function AdminProductFormPage() {
 
   return (
     <section className='page'>
-      <h1 className='page__title'>{isNew ? 'Новый товар' : `Товар #${productId}`}</h1>
+      <h1 className='page__title'>
+        {isNew ? 'Новый товар' : `Товар #${productId}`}
+        {product?.disabled && <span className='badge badge--muted'>скрыт из каталога</span>}
+      </h1>
       <ApiErrorBox error={error} fieldNames={FIELD_NAMES} />
+
+      {product?.disabled && (
+        <div className='toolbar'>
+          <button type='button' className='btn btn--primary' onClick={handleRestore} disabled={busy}>
+            вернуть в продажу
+          </button>
+          <span className='form__hint'>
+            Товар скрыт: покупатели его не видят. «Вернуть в продажу» снимает скрытие
+            и снова делает позицию доступной.
+          </span>
+        </div>
+      )}
 
       <form className='form' onSubmit={handleSubmit}>
         <label className='field'>

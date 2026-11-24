@@ -9,17 +9,21 @@ import {NotFoundPage} from './pages/NotFoundPage';
 import {OrderDetailsPage} from './pages/OrderDetailsPage';
 import {OrdersPage} from './pages/OrdersPage';
 import {ProductPage} from './pages/ProductPage';
+import {ProfilePage} from './pages/ProfilePage';
 import {RegisterPage} from './pages/RegisterPage';
+import {VerifyEmailPage} from './pages/VerifyEmailPage';
 import {AdminOrdersPage} from './pages/admin/AdminOrdersPage';
 import {AdminProductFormPage} from './pages/admin/AdminProductFormPage';
 import {AdminProductsPage} from './pages/admin/AdminProductsPage';
+import {AdminPromoCodesPage} from './pages/admin/AdminPromoCodesPage';
 import {AdminUsersPage} from './pages/admin/AdminUsersPage';
 
 /**
- * Mapa маршрутов.
+ * Карта маршрутов.
  *  - /catalog, /product/:id — доступны гостям (как и соответствующие GET в API);
  *  - /cart — локальная корзина, вход не нужен;
- *  - /checkout, /orders — ProtectedRoute (на сервере эти же запросы требуют токен);
+ *  - /verify-email — публичная: PIN-код подтверждает аккаунт ещё ДО выдачи токенов;
+ *  - /profile, /checkout, /orders — ProtectedRoute (на сервере эти же запросы требуют токен);
  *  - /admin/** — ProtectedRoute adminOnly (на сервере — hasRole('ADMIN')).
  */
 export function App() {
@@ -31,7 +35,19 @@ export function App() {
         <Route path='/product/:id' element={<ProductPage />} />
         <Route path='/login' element={<LoginPage />} />
         <Route path='/register' element={<RegisterPage />} />
+        {/* Подтверждение e-mail по PIN-коду: доступ открыт и без токена —
+            аккаунт ещё не активирован, токенов у пользователя нет */}
+        <Route path='/verify-email' element={<VerifyEmailPage />} />
         <Route path='/cart' element={<CartPage />} />
+
+        <Route
+          path='/profile'
+          element={
+            <ProtectedRoute>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
 
         <Route
           path='/checkout'
@@ -79,6 +95,14 @@ export function App() {
           element={
             <ProtectedRoute adminOnly>
               <AdminOrdersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path='/admin/promo-codes'
+          element={
+            <ProtectedRoute adminOnly>
+              <AdminPromoCodesPage />
             </ProtectedRoute>
           }
         />

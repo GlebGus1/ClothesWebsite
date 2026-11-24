@@ -8,6 +8,18 @@ export const listSizes = (): Promise<string[]> => getJson<string[]>('/tshirts/si
 
 export const getTShirt = (id: number): Promise<TShirtDetailsDto> => getJson<TShirtDetailsDto>(`/tshirts/${id}`);
 
+/**
+ * Карточка ЛЮБОЙ позиции, включая скрытую (is_disabled=true).
+ * Публичный GET /tshirts/{id} такие товары прячет, поэтому форма редактирования
+ * скрытого товара получала 404. Этот эндпоинт закрыт ролью ADMIN на сервере.
+ */
+export const getTShirtForAdmin = (id: number): Promise<TShirtDetailsDto> =>
+  getJson<TShirtDetailsDto>(`/admin/tshirts/${id}`);
+
+/** «Вернуть в продажу» для скрытого товара: is_disabled=false + available=true. */
+export const restoreTShirt = (id: number): Promise<TShirtDetailsDto> =>
+  patchJson<TShirtDetailsDto>(`/admin/tshirts/${id}/restore`);
+
 export const deleteTShirt = (id: number): Promise<void> => deleteResource(`/tshirts/${id}`);
 
 export const setPreviewImage = (tShirtId: number, imageId: number): Promise<TShirtDetailsDto> =>

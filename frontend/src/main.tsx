@@ -4,6 +4,7 @@ import {BrowserRouter} from 'react-router-dom';
 import {App} from './App';
 import {AuthProvider} from './context/AuthContext';
 import {CartProvider} from './context/CartContext';
+import {FavoritesProvider} from './context/FavoritesContext';
 import './styles/tokens.css';
 import './styles/layout.css';
 import './styles/components.css';
@@ -18,9 +19,13 @@ createRoot(rootElement).render(
   <StrictMode>
     <BrowserRouter>
       <AuthProvider>
-        <CartProvider>
-          <App />
-        </CartProvider>
+        {/* FavoritesProvider внутри AuthProvider: избранное грузим только когда
+            известен пользователь (id берём из токена, а не из параметров запроса) */}
+        <FavoritesProvider>
+          <CartProvider>
+            <App />
+          </CartProvider>
+        </FavoritesProvider>
       </AuthProvider>
     </BrowserRouter>
   </StrictMode>,

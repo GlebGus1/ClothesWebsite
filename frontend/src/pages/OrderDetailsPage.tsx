@@ -3,6 +3,7 @@ import {Link, useLocation, useParams} from 'react-router-dom';
 import {getOrder} from '../api/orders';
 import {toApiError, type ApiRequestError} from '../api/http';
 import {ApiErrorBox} from '../components/ApiErrorBox';
+import {OrderTotals} from '../components/OrderTotals';
 import {Spinner} from '../components/Spinner';
 import type {OrderDto} from '../types/api';
 import {dateTime, money, statusLabel} from '../utils/format';
@@ -93,10 +94,7 @@ export function OrderDetailsPage() {
               </li>
             ))}
           </ul>
-          <p className='cart__total'>
-            <span>Итого</span>
-            <b>{money(order.items.reduce((sum, item) => sum + (item.price ?? 0), 0))}</b>
-          </p>
+          <OrderTotals order={order} />
         </div>
       </div>
 

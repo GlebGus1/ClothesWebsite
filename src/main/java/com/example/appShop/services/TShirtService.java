@@ -67,6 +67,26 @@ public class TShirtService {
         return tShirtMapper.toDetailsDto(tShirt, imageRepository.findAllByTShirt(id));
     }
 
+    /**
+     * Карточка для админки. Публичный getDetails скрывает снятые с продажи
+     * (is_disabled=true) товары, и админ не мог открыть форму правки такого товара —
+     * получал 404. Этот метод читает ЛЮБУЮ позицию, включая скрытую.
+     */
+    @Transactional(readOnly = true)
+    public TShirtDetailsDto getDetailsForAdmin(long id) {
+        TShirt tShirt = getForAdminOrThrow(id);
+        return tShirtMapper.toDetailsDto(tShirt, imageRepository.findAllByTShirt(id));
+    }
+
+    /** Карточки «избранного» и других списков сущностей: одним запросом тянем id галерей. */
+    @Transactional(readOnly = true)
+    public List<TShirtDto> asDtoList(List<TShirt> tShirts) {
+        Map<Long, List<Long>> galleries = imageIdsByProduct(tShirts);
+        return tShirts.stream()
+                .map(tShirt -> tShirtMapper.toDto(tShirt, galleries.getOrDefault(tShirt.getId(), List.of())))
+                .toList();
+    }
+
     @Transactional(readOnly = true)
     public List<String> availableSizes() {
         return tShirtRepository.findDistinctSizes();
@@ -94,12 +114,15 @@ public class TShirtService {
     /**
      * Обновление товара: поля меняем всегда, картинки только ДОБАВЛЯЕМ.
      * Удаляются картинки отдельной операцией DELETE /api/images/{id}.
+     *
+     * Скрытый (is_disabled=true) товар тоже можно редактировать: PUT /api/tshirts/{id}
+     * доступен только роли ADMIN (SecurityConfig), поэтому здесь читаем без фильтра.
      */
     @Transactional
     public TShirtDetailsDto update(long id, TShirtFormRequest form, List<MultipartFile> files) {
         ImageUploadPolicy.checkCount(files);
 
-        TShirt tShirt = getOrThrow(id);
+        TShirt tShirt = getForAdminOrThrow(id);
         applyForm(tShirt, form);
 
         attachImages(tShirt, files);
@@ -107,6 +130,20 @@ public class TShirtService {
         tShirtRepository.save(tShirt);
 
         return tShirtMapper.toDetailsDto(tShirt, imageRepository.findAllByTShirt(id));
+    }
+
+    /**
+     * «Вернуть в продажу» для скрытого товара: is_disabled=false + available=true.
+     * Оба поля ставим вместе, потому что delete() при скрытии выключает их парой
+     * (см. метод delete) — иначе товар вернулся бы в каталог с плашкой «продано».
+     */
+    @Transactional
+    public TShirtDetailsDto restore(long id) {
+        TShirt tShirt = getForAdminOrThrow(id);
+        tShirt.setDisabled(false);
+        tShirt.setAvailable(true);
+        tShirtRepository.save(tShirt);
+        return getDetailsForAdmin(id);
     }
 
     /**
@@ -139,19 +176,25 @@ public class TShirtService {
 
     @Transactional
     public TShirtDetailsDto setPreviewImage(long tShirtId, long imageId) {
-        TShirt tShirt = getOrThrow(tShirtId);
+        TShirt tShirt = getForAdminOrThrow(tShirtId);
         imageRepository.findById(imageId)
                 .filter(image -> image.gettShirt() != null && image.gettShirt().getId() == tShirtId)
                 .orElseThrow(() -> new NotFoundException("Картинка", imageId));
 
         tShirt.setPreviewImageId(Math.toIntExact(imageId));
         tShirtRepository.save(tShirt);
-        return getDetails(tShirtId);
+        return getDetailsForAdmin(tShirtId);
     }
 
     private TShirt getOrThrow(long id) {
         return tShirtRepository.findById(id)
                 .filter(tShirt -> !tShirt.isDisabled())
+                .orElseThrow(() -> new NotFoundException("Футболка", id));
+    }
+
+    /** Чтение без фильтра «не скрыт»: только для операций, доступных админу. */
+    private TShirt getForAdminOrThrow(long id) {
+        return tShirtRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("Футболка", id));
     }
 

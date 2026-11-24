@@ -20,6 +20,15 @@ public record OrderDto(
         Instant createdAt,
         Long customerId,
         String customerEmail,
+        /**
+         * Промокод, применённый к заказу (null — без скидки). Храним строкой-«слепком»:
+         * заказ не должен меняться, если админ удалит или переименует сам код.
+         */
+        String promoCode,
+        int discountPercent,
+        double discountAmount,
+        /** Итог к оплате = сумма позиций без скидки минус скидка. */
+        double total,
         List<Item> items
 ) {
 

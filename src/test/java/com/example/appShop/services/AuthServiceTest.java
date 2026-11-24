@@ -5,11 +5,16 @@ import com.example.appShop.dto.AuthRequest;
 import com.example.appShop.dto.AuthResponse;
 import com.example.appShop.dto.RefreshRequest;
 import com.example.appShop.dto.RegisterRequest;
+import com.example.appShop.dto.SendCodeRequest;
 import com.example.appShop.dto.TokenPair;
+import com.example.appShop.dto.VerificationStatusDto;
+import com.example.appShop.dto.VerifyEmailRequest;
 import com.example.appShop.entities.RefreshToken;
 import com.example.appShop.entities.User;
+import com.example.appShop.exceptions.AccountNotVerifiedException;
 import com.example.appShop.exceptions.ConflictException;
 import com.example.appShop.exceptions.InvalidCredentialsException;
+import com.example.appShop.exceptions.InvalidTokenException;
 import com.example.appShop.security.JwtTokenProvider;
 import com.example.appShop.security.RefreshTokenService;
 import com.example.appShop.security.UserPrincipal;
@@ -21,6 +26,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.DisabledException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.userdetails.UserDetailsService;
 
@@ -35,8 +41,9 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * Оркестратор авторизации. Проверяем самое дорогое: правила ротации,
- * нормализацию e-mail и то, что мы не подсказываем злоумышленнику лишнего.
+ * Оркестратор авторизации. Проверяем самое дорогое: правила ротации refresh-токена,
+ * нормализацию e-mail, то, что мы не подсказываем злоумышленнику лишнего, и то,
+ * что до подтверждения e-mail токенов у клиента нет.
  */
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -49,6 +56,8 @@ class AuthServiceTest {
     private UserDetailsService userDetailsService;
     @Mock
     private RefreshTokenService refreshTokenService;
+    @Mock
+    private EmailVerificationService verificationService;
 
     private JwtTokenProvider tokenProvider;
     private AuthService authService;
@@ -59,7 +68,7 @@ class AuthServiceTest {
                 "auth-service-test-secret-auth-service-test-secret-0123456789-abcd",
                 Duration.ofMinutes(15), Duration.ofDays(7), "appshop"));
         authService = new AuthService(authenticationManager, userService, userDetailsService,
-                refreshTokenService, tokenProvider);
+                refreshTokenService, tokenProvider, verificationService);
     }
 
     @Test
@@ -73,35 +82,80 @@ class AuthServiceTest {
     }
 
     @Test
-    void registerReturnsBothTokensAndProfile() {
+    void registerDoesNotIssueTokensUntilEmailIsConfirmed() {
+        User notConfirmed = user(5L, "user@example.com", false);
+        notConfirmed.setEnabled(false);
         when(userService.existsByEmail("user@example.com")).thenReturn(false);
-        when(userService.create(any())).thenReturn(user(5L, "user@example.com", false));
-        when(refreshTokenService.issue(any())).thenReturn(new TokenPair("access-1", "refresh-1"));
+        when(userService.create(any())).thenReturn(notConfirmed);
+        when(verificationService.isVerificationRequired()).thenReturn(true);
 
-        AuthResponse response = authService.register(new RegisterRequest("Иван", "Петров",
+        VerificationStatusDto status = authService.register(new RegisterRequest("Иван", "Петров",
                 " User@Example.com ", "secret123"));
 
-        assertThat(response.accessToken()).isEqualTo("access-1");
-        assertThat(response.refreshToken()).isEqualTo("refresh-1");
-        assertThat(response.tokenType()).isEqualTo("Bearer");
-        assertThat(response.expiresIn()).isEqualTo(15 * 60);
-        assertThat(response.user().email()).isEqualTo("user@example.com");
-        assertThat(response.user().admin()).isFalse();
+        assertThat(status.requiresVerification()).isTrue();
+        assertThat(status.email()).isEqualTo("user@example.com");
+        assertThat(status.message()).contains("PIN");
+        // главное: регистрация не выдаёт ключи от магазина
+        verify(refreshTokenService, never()).issue(any());
+        verify(verificationService).issueCode(notConfirmed);
     }
 
     @Test
-    void registerIssuesTokensForFreshlySavedUser() {
-        when(userService.existsByEmail(anyString())).thenReturn(false);
-        when(userService.create(any())).thenReturn(user(9L, "new@example.com", false));
-        when(refreshTokenService.issue(any())).thenReturn(new TokenPair("a", "r"));
+    void registerActivatesAccountWhenVerificationIsDisabled() {
+        User fresh = user(6L, "shop@example.com", false);
+        when(userService.existsByEmail("shop@example.com")).thenReturn(false);
+        when(userService.create(any())).thenReturn(fresh);
+        when(verificationService.isVerificationRequired()).thenReturn(false);
 
-        authService.register(new RegisterRequest("Нов", "Поль", "new@example.com", "secret123"));
+        VerificationStatusDto status = authService.register(new RegisterRequest("Ива", "Петров",
+                " Shop@example.com ", "secret123"));
+
+        assertThat(status.requiresVerification()).isFalse();
+        verify(verificationService).activate(fresh);
+        verify(verificationService, never()).issueCode(any());
+    }
+
+    @Test
+    void verifyEmailIssuesTokensOnlyAfterCodeIsConfirmed() {
+        User notConfirmed = user(7L, "new@example.com", false);
+        notConfirmed.setEnabled(false);
+        when(userService.getByEmailOrThrow("new@example.com")).thenReturn(notConfirmed);
+        when(refreshTokenService.issue(any())).thenReturn(new TokenPair("access-1", "refresh-1"));
+
+        AuthResponse response = authService.verifyEmail(new VerifyEmailRequest(" new@example.com ", "421317"));
+
+        verify(verificationService).confirm(notConfirmed, "421317");
+        assertThat(response.accessToken()).isEqualTo("access-1");
+        assertThat(response.tokenType()).isEqualTo("Bearer");
+        assertThat(response.expiresIn()).isEqualTo(15 * 60);
+        assertThat(response.user().email()).isEqualTo("new@example.com");
 
         ArgumentCaptor<UserPrincipal> principal = ArgumentCaptor.forClass(UserPrincipal.class);
         verify(refreshTokenService).issue(principal.capture());
-        // id берётся из сохранённой сущности, а не из запроса клиента
-        assertThat(principal.getValue().getId()).isEqualTo(9L);
-        assertThat(principal.getValue().getUsername()).isEqualTo("new@example.com");
+        // id берём из сохранённой сущности, а не из запроса клиента
+        assertThat(principal.getValue().getId()).isEqualTo(7L);
+    }
+
+    @Test
+    void resendCodeDoesNotRevealWhetherEmailExists() {
+        when(userService.findByEmail("ghost@example.com")).thenReturn(java.util.Optional.empty());
+
+        VerificationStatusDto status = authService.resendVerificationCode(new SendCodeRequest("ghost@example.com"));
+
+        assertThat(status.requiresVerification()).isTrue();
+        verify(verificationService, never()).issueCode(any());
+    }
+
+    @Test
+    void resendSkipsSendingForAlreadyConfirmedEmail() {
+        User confirmed = user(3L, "user@example.com", false);
+        confirmed.setEnabled(true);
+        when(userService.findByEmail("user@example.com")).thenReturn(java.util.Optional.of(confirmed));
+
+        VerificationStatusDto status = authService.resendVerificationCode(new SendCodeRequest("user@example.com"));
+
+        assertThat(status.requiresVerification()).isFalse();
+        verify(verificationService, never()).issueCode(any());
     }
 
     @Test
@@ -128,6 +182,17 @@ class AuthServiceTest {
         assertThatExceptionOfType(InvalidCredentialsException.class)
                 .isThrownBy(() -> authService.login(new AuthRequest("ghost@example.com", "wrong")))
                 .withMessage("Неверный e-mail или пароль");
+        verify(refreshTokenService, never()).issue(any());
+    }
+
+    @Test
+    void loginOfUnconfirmedAccountAsksForPinCode() {
+        // AuthenticationManager бросает DisabledException, когда UserDetails.isEnabled()==false:
+        // пароль верный, но e-mail не подтверждён PIN-кодом
+        when(authenticationManager.authenticate(any())).thenThrow(new DisabledException("disabled"));
+
+        assertThatExceptionOfType(AccountNotVerifiedException.class)
+                .isThrownBy(() -> authService.login(new AuthRequest("new@example.com", "secret123")));
         verify(refreshTokenService, never()).issue(any());
     }
 
@@ -161,6 +226,23 @@ class AuthServiceTest {
 
         // повышение прав видно сразу, старый access-токен доживает максимум 15 минут
         assertThat(response.user().admin()).isTrue();
+    }
+
+    @Test
+    void refreshDoesNotExtendAccessForUnconfirmedAccount() {
+        RefreshToken stored = new RefreshToken();
+        stored.setUserEmail("new@example.com");
+        UserPrincipal unconfirmed = new UserPrincipal(3L, "new@example.com", "hash", false, false);
+        when(refreshTokenService.validateAndGetEntity("r")).thenReturn(stored);
+        when(userDetailsService.loadUserByUsername("new@example.com")).thenReturn(unconfirmed);
+        when(userService.getByEmailOrThrow("new@example.com")).thenReturn(user(3L, "new@example.com", false));
+
+        assertThatExceptionOfType(InvalidTokenException.class)
+                .isThrownBy(() -> authService.refresh(new RefreshRequest("r")));
+
+        // токен, которым «пробуют» войти в неподтверждённый аккаунт, отзываем
+        verify(refreshTokenService).revoke("r");
+        verify(refreshTokenService, never()).issue(any());
     }
 
     @Test

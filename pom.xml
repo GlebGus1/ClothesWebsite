@@ -41,6 +41,15 @@
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
         </dependency>
+        <!--
+          Отправка писем (PIN подтверждения регистрации). Spring Boot сам создаст бин
+          JavaMailSender, только если задан spring.mail.host (см. application.properties);
+          если хоста нет — бина нет, и код приложения работает в режиме «PIN в лог».
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-mail</artifactId>
+        </dependency>
 
         <!-- JWT (jjwt): access + refresh токены -->
         <dependency>

@@ -6,6 +6,10 @@ export const money = (value: number | null | undefined): string =>
 export const dateTime = (value: string | null | undefined): string =>
   value ? new Date(value).toLocaleString('ru-RU', {dateStyle: 'short', timeStyle: 'short'}) : '—';
 
+/** Только дата (без времени) — например, срок действия промокода. */
+export const shortDate = (value: string | null | undefined): string =>
+  value ? new Date(value).toLocaleDateString('ru-RU') : '—';
+
 /** Человекочитаемые статусы заказа (значения перечисления Order.OrderStatus). */
 export const STATUS_LABELS: Record<OrderStatus, string> = {
   PROCESSING: 'Принимается',

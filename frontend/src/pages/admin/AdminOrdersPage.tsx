@@ -84,7 +84,15 @@ export function AdminOrdersPage() {
                   <div className='muted'>индекс {order.postalCode} · {order.phoneNumber}</div>
                 </td>
                 <td>{order.items.map((item) => `${item.name} (${item.size ?? '—'})`).join(', ')}</td>
-                <td>{money(order.items.reduce((sum, item) => sum + (item.price ?? 0), 0))}</td>
+                <td>
+                  {/* сумму берём из ответа сервера: в ней уже учтена скидка промокода */}
+                  {money(order.total)}
+                  {order.promoCode && (
+                    <div className='muted'>
+                      промокод {order.promoCode} −{order.discountPercent}% (скидка {money(order.discountAmount)})
+                    </div>
+                  )}
+                </td>
                 <td>{dateTime(order.createdAt)}</td>
                 <td>
                   <select

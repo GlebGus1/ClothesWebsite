@@ -21,6 +21,17 @@ export interface AuthResponse {
   user: UserDto;
 }
 
+/**
+ * Ответ регистрации и повторной отправки кода. Токенов здесь НЕТ: пока e-mail
+ * не подтверждён PIN-кодом, доступа к API у аккаунта быть не должно.
+ */
+export interface VerificationStatusDto {
+  email: string;
+  /** true — ждём ввод 6-значного PIN-кода; false — подтверждение не нужен (выключен на сервере). */
+  requiresVerification: boolean;
+  message: string;
+}
+
 export interface PageResponse<T> {
   content: T[];
   page: number;
@@ -100,6 +111,12 @@ export interface OrderDto {
   createdAt: string | null;
   customerId: number | null;
   customerEmail: string | null;
+  /** Промокод заказа (null — без скидки). Бэкенд хранит его «слепком». */
+  promoCode: string | null;
+  discountPercent: number;
+  discountAmount: number;
+  /** Итог к оплате, посчитанный сервером. */
+  total: number;
   items: OrderItemDto[];
 }
 
@@ -109,6 +126,42 @@ export interface CreateOrderPayload {
   postalCode: string;
   phoneNumber: string;
   tshirtIds: number[];
+  promoCode: string | null;
+}
+
+/** Денежные итоги, которые посчитал сервер (цене из localStorage доверять нельзя). */
+export interface TotalsDto {
+  subtotal: number;
+  discountPercent: number;
+  discountAmount: number;
+  total: number;
+}
+
+export interface PromoCodeDto {
+  id: number;
+  code: string;
+  discountPercent: number;
+  active: boolean;
+  /** null — бессрочный код. */
+  expiresAt: string | null;
+  createdAt: string | null;
+}
+
+/** Поля формы промокода в админке: пустой code — сервер сам сгенерирует код. */
+export interface PromoCodeForm {
+  code: string;
+  discountPercent: number | null;
+  active: boolean;
+  expiresAt: string | null;
+}
+
+/** Ответ проверки промокода в корзине: код + ПЕРЕСЧИТАННЫЕ сервером суммы. */
+export interface PromoValidationResult {
+  code: string;
+  discountPercent: number;
+  expiresAt: string | null;
+  totals: TotalsDto;
+  message: string;
 }
 
 export interface CatalogQuery {

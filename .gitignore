@@ -33,4 +33,4 @@ build/
 .vscode/
 
 secrets.properties
-spring.config.additional-location=file:/resources/secrets.properties
+spring.config.additional-location=file:/resources/secrets.propertiessecrets.properties

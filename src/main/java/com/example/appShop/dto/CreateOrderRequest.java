@@ -3,6 +3,7 @@ package com.example.appShop.dto;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
 
 import java.util.List;
 
@@ -26,6 +27,13 @@ public record CreateOrderRequest(
         String phoneNumber,
 
         @NotEmpty(message = "Корзина пуста")
-        List<Long> tshirtIds
+        List<Long> tshirtIds,
+
+        /**
+         * Промокод по желанию: null/пустая строка — без скидки. Сервер проверяет код
+         * сам (активен, не просрочен, существует), клиенту итог не доверяем.
+         */
+        @Size(max = 40, message = "Промокод слишком длинный")
+        String promoCode
 ) {
 }

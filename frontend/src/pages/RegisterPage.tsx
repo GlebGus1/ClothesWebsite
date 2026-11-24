@@ -14,7 +14,10 @@ const FIELD_NAMES: Record<string, string> = {
 /**
  * Регистрация. Правила длины поля заданы на бэкенде (аннотации в RegisterRequest),
  * поэтому тексты ошибок приходит сразу в ApiError.fields — фронтенд их только печатает.
- * Успешная регистрация сразу логинит: бэкенд возвращает пару токенов.
+ *
+ * ВАЖНО: регистрация больше НЕ логинит. Бэкенд создаёт аккаунт со статусом
+ * «не подтверждён» и отправляет 6-значный PIN-код, поэтому нас ждут на /verify-email.
+ * Токенов у пользователя нет, пока он не введёт этот PIN-код.
  */
 export function RegisterPage() {
   const {register} = useAuth();
@@ -35,14 +38,21 @@ export function RegisterPage() {
     }
 
     setBusy(true);
+    const email = String(data.get('email'));
     try {
-      await register({
+      const status = await register({
         firstName: String(data.get('firstName')),
         lastName: String(data.get('lastName')),
-        email: String(data.get('email')),
+        email,
         password,
       });
-      navigate('/catalog', {replace: true});
+      if (status.requiresVerification) {
+        // передаём e-mail состоянием маршрута — форма PIN-кода не должна спрашивать его заново
+        navigate('/verify-email', {replace: true, state: {email: status.email, message: status.message}});
+      } else {
+        // на сервере подтверждение отключено (app.verification.enabled=false) — сразу на вход
+        navigate('/login', {replace: true, state: {email, message: status.message}});
+      }
     } catch (err) {
       setError(toApiError(err));
     } finally {
@@ -85,6 +95,12 @@ export function RegisterPage() {
         <button type='submit' className='btn btn--primary btn--large' disabled={busy}>
           {busy ? 'Создаём аккаунт…' : 'зарегистрироваться'}
         </button>
+
+        <p className='form__hint'>
+          После регистрации мы отправим на почту 6-значный PIN-код: вход откроется только
+          после его ввода. Если письмо не пришло, а сервер работает локально — PIN-код
+          напечатан в консоли бэкенда.
+        </p>
 
         <p className='form__hint'>
           Уже есть аккаунт? <Link to='/login'>войти</Link>

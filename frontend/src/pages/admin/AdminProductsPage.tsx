@@ -1,6 +1,6 @@
-import {useEffect, useState} from 'react';
+import {useCallback, useEffect, useState} from 'react';
 import {Link} from 'react-router-dom';
-import {deleteTShirt, listTShirts} from '../../api/catalog';
+import {deleteTShirt, listTShirts, restoreTShirt} from '../../api/catalog';
 import {imageUrl, toApiError, type ApiRequestError} from '../../api/http';
 import {Pagination} from '../../components/Pagination';
 import {Spinner} from '../../components/Spinner';
@@ -10,19 +10,29 @@ import {money} from '../../utils/format';
 /**
  * Админ: список товаров. Флаг includeDisabled=true показывает и «удалённые»
  * (мягко удалённые) позиции — бэкенд учитывает его только для роли ADMIN.
+ *
+ * Для скрытой позиции кнопка «скрыть» НЕ показываем — вместо неё «вернуть в
+ * продажу» (PATCH /api/admin/tshirts/{id}/restore): иначе снятую с продажи вещь
+ * было бы нечем вернуть обратно, кроме как через форму товара.
  */
 export function AdminProductsPage() {
   const [page, setPage] = useState<PageResponse<TShirtDto> | null>(null);
   const [showDisabled, setShowDisabled] = useState(false);
   const [pageNumber, setPageNumber] = useState(0);
   const [error, setError] = useState<ApiRequestError | null>(null);
+  const [feedback, setFeedback] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
 
-  useEffect(() => {
-    listTShirts({page: pageNumber, pageSize: 20, includeDisabled: showDisabled})
+  const load = useCallback(() => {
+    setError(null);
+    return listTShirts({page: pageNumber, pageSize: 20, includeDisabled: showDisabled})
       .then(setPage)
       .catch((err) => setError(toApiError(err)));
   }, [pageNumber, showDisabled]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   async function handleDelete(id: number) {
     if (!window.confirm(`Скрыть товар #${id} из каталога? История заказов сохранится.`)) {
@@ -31,7 +41,41 @@ export function AdminProductsPage() {
     setBusyId(id);
     try {
       await deleteTShirt(id);
-      setPage((current) => (current ? {...current, content: current.content.filter((item) => item.id !== id)} : current));
+      // если скрытые позиции сейчас показаны, запись остаётся в списке, но
+      // помечается как скрытая; при showDisabled=false её просто убираем
+      setPage((current) => {
+        if (!current) {
+          return current;
+        }
+        const content = showDisabled
+          ? current.content.map((item) => (item.id === id ? {...item, disabled: true, available: false} : item))
+          : current.content.filter((item) => item.id !== id);
+        return {...current, content};
+      });
+      setFeedback(`Товар #${id} скрыт из каталога (заказы остались)`);
+    } catch (err) {
+      setError(toApiError(err));
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  async function handleRestore(id: number) {
+    setBusyId(id);
+    setError(null);
+    try {
+      const restored = await restoreTShirt(id);
+      setPage((current) => {
+        if (!current) {
+          return current;
+        }
+        // товар возвращается в продажу: is_disabled=false, available=true
+        const content = current.content.map((item) =>
+          item.id === id ? {...item, disabled: false, available: true} : item,
+        );
+        return {...current, content};
+      });
+      setFeedback(`Товар #${restored.id} снова в продаже`);
     } catch (err) {
       setError(toApiError(err));
     } finally {
@@ -58,6 +102,7 @@ export function AdminProductsPage() {
       </div>
 
       {error && <p className='alert alert--error'>{error.message}</p>}
+      {feedback && <p className='alert alert--success'>{feedback}</p>}
 
       <div className='table-wrap'>
         <table className='table'>
@@ -103,14 +148,26 @@ export function AdminProductsPage() {
                   <Link className='btn btn--ghost btn--small' to={`/admin/products/edit/${product.id}`}>
                     изменить
                   </Link>
-                  <button
-                    type='button'
-                    className='btn btn--danger btn--small'
-                    onClick={() => handleDelete(product.id)}
-                    disabled={busyId === product.id}
-                  >
-                    скрыть
-                  </button>
+                  {product.disabled ? (
+                    // скрытую позицию нельзя «скрыть» ещё раз — только вернуть
+                    <button
+                      type='button'
+                      className='btn btn--primary btn--small'
+                      onClick={() => handleRestore(product.id)}
+                      disabled={busyId === product.id}
+                    >
+                      {busyId === product.id ? 'Возвращаем…' : 'вернуть в продажу'}
+                    </button>
+                  ) : (
+                    <button
+                      type='button'
+                      className='btn btn--danger btn--small'
+                      onClick={() => handleDelete(product.id)}
+                      disabled={busyId === product.id}
+                    >
+                      скрыть
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

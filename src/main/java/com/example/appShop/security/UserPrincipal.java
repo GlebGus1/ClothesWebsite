@@ -24,16 +24,24 @@ public class UserPrincipal implements UserDetails {
     private final String email;
     private final String password;
     private final boolean admin;
+    /** Аккаунт подтверждён по e-mail (enabled=true). Не подтверждённый не может войти. */
+    private final boolean enabled;
 
     public UserPrincipal(long id, String email, String password, boolean admin) {
+        this(id, email, password, admin, true);
+    }
+
+    public UserPrincipal(long id, String email, String password, boolean admin, boolean enabled) {
         this.id = id;
         this.email = email;
         this.password = password;
         this.admin = admin;
+        this.enabled = enabled;
     }
 
     public static UserPrincipal fromEntity(User user) {
-        return new UserPrincipal(user.getId(), user.getEmail(), user.getPassword(), user.isAdmin());
+        return new UserPrincipal(user.getId(), user.getEmail(), user.getPassword(),
+                user.isAdmin(), user.isEnabled());
     }
 
     /** id пользователя — используется в заказах. */
@@ -64,7 +72,9 @@ public class UserPrincipal implements UserDetails {
     }
 
     // Spring Security 6: эти методы больше не вызываются автоматически проверками аккаунта,
-    // но UserDetails их требует. Держим поведение прежним (учётка активна всегда).
+    // но UserDetails их требует. Проверку «подтверждён ли e-mail» включаем именно здесь:
+    // DaoAuthenticationProvider вызывает isEnabled() сам (см. AccountStatusUserDetailsChecker),
+    // и неподтверждённый аккаунт получает DisabledException ещё до выпуска токенов.
     @Override
     public boolean isAccountNonExpired() {
         return true;
@@ -82,6 +92,6 @@ public class UserPrincipal implements UserDetails {
 
     @Override
     public boolean isEnabled() {
-        return true;
+        return enabled;
     }
 }

@@ -1,15 +1,21 @@
 import {Link} from 'react-router-dom';
 import {imageUrl} from '../api/http';
+import {PromoCodeBox, PromoTotals} from '../components/PromoCodeBox';
 import {useCart} from '../context/CartContext';
+import {usePromo} from '../hooks/usePromo';
 import {money} from '../utils/format';
 
 /**
  * Корзина живёт в localStorage и отправляется на сервер списком id (tshirtIds).
  * Цены и названия здесь «для красоты»: итог к заказу сервер считает сам по ценам
  * из БД (OrderService), поэтому обмануть фронтенд изменённой ценой нельзя.
+ *
+ * Промокод можно ввести уже здесь — сумма и скидка приходят с сервера, а сам код
+ * хранится в CartContext и переносится на страницу оформления.
  */
 export function CartPage() {
   const {items, remove, total, count} = useCart();
+  const promo = usePromo(items.map((item) => item.id));
 
   if (count === 0) {
     return (
@@ -50,9 +56,21 @@ export function CartPage() {
         ))}
       </ul>
 
+      <PromoCodeBox
+        savedCode={promo.savedCode}
+        applied={promo.applied}
+        error={promo.error}
+        busy={promo.busy}
+        disabled={count === 0}
+        onApply={promo.applyCode}
+        onClear={promo.clearCode}
+      />
+
+      <PromoTotals subtotal={total} promo={promo.applied} />
+
       <div className='cart__total'>
         <span>Итого</span>
-        <b>{money(total)}</b>
+        <b>{money(promo.applied?.totals.total ?? total)}</b>
       </div>
 
       <div className='page__actions'>

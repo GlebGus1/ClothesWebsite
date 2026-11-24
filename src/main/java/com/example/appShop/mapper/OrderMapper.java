@@ -1,6 +1,7 @@
 package com.example.appShop.mapper;
 
 import com.example.appShop.dto.OrderDto;
+import com.example.appShop.dto.TotalsDto;
 import com.example.appShop.entities.Order;
 import com.example.appShop.entities.TShirt;
 import org.springframework.stereotype.Component;
@@ -24,6 +25,10 @@ public class OrderMapper {
                 .map(this::toItem)
                 .toList();
 
+        // Итог считаем по ценам заказа, а не по тем, что «прислал» браузер.
+        double subtotal = items.stream().mapToDouble(item -> item.price() == null ? 0.0 : item.price()).sum();
+        TotalsDto totals = TotalsDto.of(subtotal, order.getDiscountPercent());
+
         return new OrderDto(
                 order.getId(),
                 order.getOrderStatus(),
@@ -34,6 +39,10 @@ public class OrderMapper {
                 order.getCreatedAt(),
                 order.getUser() == null ? null : (long) order.getUser().getId(),
                 order.getUser() == null ? null : order.getUser().getEmail(),
+                order.getPromoCode(),
+                totals.discountPercent(),
+                totals.discountAmount(),
+                totals.total(),
                 items);
     }
 

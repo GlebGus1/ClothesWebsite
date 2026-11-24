@@ -1,627 +1,257 @@
-# REPORT.md — переход на REST API + Stateless JWT и React-клиент
+# Отчёт: доработка интернет-магазина ClothesShop
 
-Документ написан в формате «что сделано → как это работает → на что смотреть».
-Все пути указаны относительно корня проекта `D:\website\ClothesWebsite-master`.
+Дата: 23.11.2026
+Ветка/рабочая копия: `D:\website\ClothesWebsite-master` (изменения **не закоммичены** — по правилу проекта коммит только с вашего разрешения).
 
-Содержание:
-
-1. [Что было и что стало](#1-что-было-и-что-стало)
-2. [Как запустить и как проверить](#2-как-запустить-и-как-проверить)
-3. [Хронология работ по этапам](#3-хронология-работ-по-этапам)
-4. [Как работает JWT в этом проекте](#4-как-работает-jwt-в-этом-проекте)
-5. [Архитектура бэкенда](#5-архитектура-бэкенда)
-6. [База данных: что изменилось](#6-база-данных-что-изменилось)
-7. [Безопасность: что реально закрыто](#7-безопасность-что-реально-закрыто)
-8. [Фронтенд: как устроен и как общается с API](#8-фронтенд-как-устроен-и-как-общается-с-api)
-9. [Тесты: 80 автотестов и 19 HTTP-сценариев](#9-тесты-80-автотестов-и-19-http-сценариев)
-10. [Найденные баги и как они были исправлены](#10-найденные-баги-и-как-они-были-исправлены)
-11. [Слабые места и что изучить дальше](#11-слабые-места-и-что-изучить-дальше)
-12. [Справочник файлов и команд](#12-справочник-файлов-и-команд)
+В работе реализованы пять блоков: (1) доступность скрытых товаров для админа, (2) плавное листание фото, (3) подтверждение e-mail по 6-значному PIN-коду, (4) промокоды и скидки, (5) избранное + профиль. В конце — результаты проверок (сборка фронтенда и тесты бэкенда) и список мест, которые стоит посмотреть вручную.
 
 ---
 
-## 1. Что было и что стало
-
-| Аспект | Было (Thymeleaf-монолит) | Стало |
-|---|---|---|
-| Интерфейс | Thymeleaf-шаблоны + `static/*.css|js` на том же Spring-приложении | React SPA в `frontend/` (Vite, TS, React Router). Старый UI перенесён в `_legacy_thymeleaf/` |
-| Аутентификация | `HttpSession` + форма логина Spring Security, `formLogin()`, редиректы | Stateless JWT: Access (15 мин) + Refresh (7 дней, ротация, хэш в БД) |
-| Корзина | `HttpSession` (`Cart` в сессии) | Клиентская корзина (`CartContext` + `localStorage`), на сервер уходит список `tshirtIds` |
-| Доступ к товарам | сервер рендерил HTML | JSON-эндпоинты `/api/tshirts` с фильтром по размеру/наличию, сортировкой и пагинацией |
-| Сортировка | поле-одиночка в контроллере `currentSize` (состояние в бине!) | белый список `TShirtSort` + `Specification` + `Pageable`; состояния в бине нет |
-| Ответы об ошибках | HTML-страницы / дефолтный `/error` | единый JSON `ApiError` (`exceptions/ApiExceptionHandler.java`) |
-| Сущности в JSON | `User`, `TShirt`, `Order` отдавались как есть | только DTO-records (`dto/*`), мапперы в `mapper/*` |
-| Роли | `USER` / `ADMIN` через сессию | те же роли, но в claims токена и в `SecurityFilterChain` |
-| Документация API | её не было | Swagger UI: `/swagger-ui.html` (springdoc) |
-| Тесты | 1 «тест», который просто поднимал контекст | 80 тестов (unit + интеграция) и смоук-скрипт на реальный HTTP |
-
-Архитектурные решения принимались по правилам `AGENTS.md`: Spring Security 6 через
-`SecurityFilterChain` и лямбды, слои `Controller(DTO) → Service → Repository`, файлы ≤ ~400 строк,
-JUnit 5 + Mockito на новую логику авторизации и сервисов, таблицы MySQL не удалялись,
-в Git ничего не коммитилось (репозитория `.git` в проекте нет).
-
----
-
-## 2. Как запустить и как проверить
+## 0. Как проверить результат
 
 ```bash
-# 0) секреты (один раз)
-cp secrets.properties.example secrets.properties   # вписать JWT_SECRET и ADMIN_* при желании
+# бэкенд: компиляция + все тесты, кроме тех, что требуют MySQL
+bash scripts/mvn.sh -o test -Dtest='!AppShopRunTest' -DfailIfNoTests=false
 
-# 1) бэкенд :8080
-bash scripts/run-backend.sh      # ждёт появления "Started AppShopRun" в target/backend.log
-bash scripts/stop-backend.sh
+# бэкенд: полный старт контекста (требует запущенный MySQL и БД appshop)
+bash scripts/mvn.sh -o test -Dtest=AppShopRunTest -DfailIfNoTests=false
 
-# 2) фронтенд :5173
-cd frontend && npm install && npm run dev
-
-# 3) проверки
-bash scripts/mvn.sh test         # 80 тестов, BUILD SUCCESS
-bash scripts/smoke-test.sh       # 19 HTTP-сценариев, "ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ"
-cd frontend && npm run build     # tsc + vite build, dist/ готов
+# фронтенд: строгая типизация + production-сборка
+cd frontend && npm run build
 ```
 
-Результаты на момент завершения работ:
-
-- `mvn test` → `Tests run: 80, Failures: 0, Errors: 0` — **BUILD SUCCESS**;
-- `scripts/smoke-test.sh` → **ВСЕ ПРОВЕРКИ ПРОЙДЕНЫ**;
-- `npm run build` → `✓ 124 modules transformed`, `dist/` собран;
-- живой прокси Vite проверен curl: `http://localhost:5173/api/tshirts` вернул JSON из MySQL,
-  `http://localhost:5173/api/auth/me` без токена вернул `401`.
+`AppShopRunTest` я не запускал: он поднимает приложение на вашей рабочей БД `appshop`, а это значит автоматическое применение DDL (см. раздел «Изменения в базе данных»). Для проверки «собирается ли контекст» без MySQL я добавил `ApplicationContextSmokeTest` на H2 — он входит в команду выше.
 
 ---
 
-## 3. Хронология работ по этапам
+## 1. Скрытые товары: админ может править и возвращать в продажу
 
-### Этап 1 — расчистка и подготовка
+### Проблема
+Товар снимается с продажи «мягко» (`t_shirt.is_disabled = true`). Публичная карточка `GET /api/tshirts/{id}` такой товар скрывает (404), поэтому форма правки в админке не могла открыть скрытую позицию, а в списке `/admin/products` у скрытой позиции была только кнопка «скрыть» — вернуть товар обратно было нечем.
 
-- Старые Thymeleaf-шаблоны, статика и JSP-подобные контроллеры перенесены в `_legacy_thymeleaf/`
-  (с `README.md` внутри). Это замена Git-истории: репозитория в проекте нет, поэтому код не удалялся,
-  а был изолирован, чтобы Spring не сканировал старые `@Controller`.
-- Из `pom.xml` убран `spring-boot-starter-thymeleaf`, добавлены: `jjwt-api/impl/jackson` 0.11.5,
-  `springdoc-openapi-starter-webmvc-ui`, `spring-boot-starter-validation`,
-  `com.mysql:mysql-connector-j` (вместо устаревшего `mysql-java-driver`), `spring-security-test`.
-- `application.properties`: настройки `jwt.*`, `app.cors.*`, лимиты multipart,
-  `spring.jpa.open-in-view=false`, путь Swagger, `secrets.properties` как внешний файл
-  (`spring.config.import=optional:secrets.properties`), опции bootstrap-администратора
-  и очистки refresh-токенов.
-- Созданы `scripts/env.sh` (локальный JDK + Maven из `~/.m2/wrapper/dists`), `scripts/mvn.sh`.
+### Что сделано в бэкенде
+- `services/TShirtService.java`
+  - публичный `getDetails(id)` как и раньше фильтрует `!isDisabled()` — приватность публичного эндпоинта не менялась;
+  - добавлен приватный `getForAdminOrThrow(id)` (без фильтра по `is_disabled`) и публичный `getDetailsForAdmin(id)`;
+  - `update(...)` и `setPreviewImage(...)` читают товар через «админский» путь, иначе правку скрытой позиции невозможно сохранить;
+  - добавлен `restore(id)` — снимает `is_disabled` **и** ставит `available = true` (иначе товар вернулся бы в каталог со статусом «продано»);
+  - добавлены тесты: `adminSeesHiddenProductInOrderToEditIt`, `hiddenProductIsEditableByPut`, `restoreReturnsHiddenProductToSale`.
+- новый `rest/AdminTShirtController.java` (`/api/admin/tshirts`):
+  - `GET  /api/admin/tshirts/{id}` — карточка любой позиции, включая скрытую;
+  - `PATCH /api/admin/tshirts/{id}/restore` — вернуть в продажу.
 
-Зачем `open-in-view=false`: по умолчанию Spring держит сессию Hibernate открытой на время
-всего HTTP-запроса, из-за чего ленивые связи «подтягиваются» прямо в шаблоне/сериализаторе.
-Это скрытая N+1-проблема и утечка соединения. Мы отдаём DTO, поэтому ленивые подгрузки нам не нужны.
+Почему отдельный контроллер, а не параметр `?admin=true` в публичном `GET /api/tshirts/{id}`: весь путь `/api/admin/**` закрыт ролью `ADMIN` в `config/SecurityConfig.java`, поэтому внутри контроллера проверок прав нет вообще, а самый чувствительный к приватности публичный эндпоинт остаётся «глупым» и безопасным.
 
-### Этап 2 — JWT-инфраструктура (`security/`)
-
-Добавлены: `JwtTokenProvider`, `JwtAuthenticationFilter`, `TokenHasher`, `TokenType`, `Roles`,
-`UserPrincipal`, `RefreshTokenService`, `entities/RefreshToken`, `repositories/RefreshTokenRepository`,
-`config/JwtProperties`, `services/RefreshTokenCleanupJob`. Подробный разбор — в разделе 4.
-
-### Этап 3 — Security 6 и конфигурация
-
-`config/SecurityConfig.java` переписан под Security 6:
-
-- `SecurityFilterChain` + лямбда-синтаксис (`http.csrf(csrf -> csrf.disable())`,
-  `sessionCreationPolicy(STATELESS)`, `authorizeHttpRequests(auth -> auth...)`);
-- `httpBasic` и `formLogin` выключены — вместо них JSON-ответы:
-  `RestAuthenticationEntryPoint` (401) и `RestAccessDeniedHandler` (403);
-- `JwtAuthenticationFilter` добавлен до `UsernamePasswordAuthenticationFilter`;
-- `config/AuthenticationConfig` даёт `BCryptPasswordEncoder`, `DaoAuthenticationProvider`
-  и `AuthenticationManager` (логин больше не «магия» автоконфигурации, а явный бин);
-- `config/CorsProperties` + `CorsConfigurationSource` — только `http://localhost:5173`
-  (переопределяется через `APP_CORS_ALLOWED_ORIGINS`);
-- `config/AdminBootstrapRunner` создаёт администратора, если заданы свойства `app.admin.*`
-  (в `application.properties` они закомментированы, а `scripts/run-backend.sh` передаёт их
-  аргументами `--app.admin.email` / `--app.admin.password` из `ADMIN_EMAIL` / `ADMIN_PASSWORD`)
-  и такого пользователя ещё нет; иначе в логе появляется
-  «Авто-создание администратора выключено» или «Пользователь … уже существует».
-- `.requestMatchers("/error").permitAll()` — важно, см. раздел 10 (без этого все
-  внутренние форварды ошибок превращались в 401).
-
-### Этап 4 — DTO, мапперы, сервисы
-
-- 16 DTO-records (`dto/`), 3 маппера (`mapper/`), спецификации `specification/TShirtSpecifications`,
-  утилиты `services/TShirtSort` (белый список сортировки) и `services/ImageUploadPolicy`
-  (тип/размер картинок), сервисы `AuthService`, `UserService`, `TShirtService`, `ImageService`,
-  `OrderService`, обработчик `exceptions/ApiExceptionHandler` + 5 классов исключений.
-- Контроллеры принимают и отдают **только** DTO: сущности не сериализуются наружу
-  (в старом коде `User` наружу отдавался даже хэш пароля — сейчас `UserDto` без пароля).
-
-### Этап 5 — REST-контроллеры (`rest/`)
-
-`AuthController`, `TShirtController`, `ImageController`, `OrderController`,
-`AdminOrderController`, `AdminUserController`. Полная таблица эндпоинтов — в разделе 5.4
-и в Swagger UI.
-
-### Этап 6 — тесты бэкенда (по `AGENTS.md`)
-
-10 тестовых классов, 80 тестов. Разбор — в разделе 9.
-
-### Этапы 7–8 — фронтенд (`frontend/`)
-
-Каркас (Vite/TS/Router/Axios), слой API с интерцепторами, контексты авторизации и корзины,
-14 страниц (включая 4 админских), компоненты, стили. Разбор — в разделе 8.
-
-### Этап 9–10 — интеграционные проверки
-
-`scripts/run-backend.sh`, `scripts/stop-backend.sh`, `scripts/smoke-test.sh` (19 сценариев),
-проверка live-прокси Vite, повторный прогон `mvn test` и `npm run build` после всех правок.
+### Что сделано во фронтенде
+- `api/catalog.ts`: `getTShirtForAdmin(id)`, `restoreTShirt(id)`.
+- `pages/admin/AdminProductFormPage.tsx`: читает товар через `getTShirtForAdmin` (скрытый открывается в форме правки), показывает бейдж «скрыт из каталога» и кнопку «вернуть в продажу».
+- `pages/admin/AdminProductsPage.tsx`:
+  - у скрытой позиции вместо «скрыть» кнопка **«вернуть в продажу»**;
+  - после скрытия строка не исчезает из списка при включённом «показывать скрытые» — меняется `disabled/available` локально;
+  - общие для списка операции переведены на `load()`-колбэк, чтобы состояние страницы обновлялось одинаково после любого действия.
 
 ---
 
-## 4. Как работает JWT в этом проекте
+## 2. Плавное листание фотографий
 
-### 4.1 Два токена вместо одной сессии
+Вместо мгновенной подмены `src` используется «лента» из всех фото и сдвиг на `translateX`.
 
-| | Access-токен | Refresh-токен |
+- `components/ProductCard.tsx`: все картинки карточки стоят в рядом лежащем ряду
+  `<div class="card__viewport"><div class="card__track" style="transform: translateX(-N*100%)">…</div></div>`;
+  стрелки меняют индекс — CSS рисует переход `transition: transform 300ms ease-in-out`.
+- `pages/ProductPage.tsx`: тот же приём (`.product__viewport` / `.product__track` / `.product__slide`), активный кадр синхронизирован с миниатюрами и счётчиком «N/M».
+- `styles/components.css`, `styles/pages.css`: новые классы + правило доступности
+  `@media (prefers-reduced-motion: reduce) { .card__track, .product__track { transition: none } }`.
+
+Почему так, а не «кроссфейд» двух картинок: все фото уже лежат в DOM (следующее не грузится в момент нажатия), анимация делает только композитор, и поведение одинаковое в каталоге и на странице товара.
+
+---
+
+## 3. Подтверждение e-mail: 6-значный PIN-код
+
+### Бэкенд
+- `pom.xml`: добавлен `spring-boot-starter-mail`.
+- `src/main/resources/application.properties`: блок `spring.mail.*` (host/port/username/password подставляются из `secrets.properties` / переменных окружения `MAIL_*`), `app.mail.from`, `app.verification.enabled`, `app.verification.code-ttl=PT24H`.
+- `config/AppMailProperties.java`, `config/VerificationProperties.java` — конфигурационные записи (подхватывает `@ConfigurationPropertiesScan`, объявленный на `AppShopRun`).
+- `services/EmailSender.java` — единственная точка отправки писем. Бин `JavaMailSender` существует только при заданном `spring.mail.host`; если хоста нет или отправка упала по `MailException`, метод честно возвращает `false` и регистрация **не** падает.
+- `services/EmailVerificationService.java`:
+  - PIN — 6 цифр из `SecureRandom` (не `java.util.Random`: код должен быть непредсказуемым);
+  - `issueCode(user)` ставит `enabled = false`, сохраняет код и отметку времени, отправляет письмо, а если писем нет — печатает в лог:
+    `PIN-код подтверждения регистрации для <email> (введите его в форме «Подтверждение e-mail»): 123456`;
+  - `confirm(user, code)` — сверка с учётом срока жизни кода (`app.verification.code-ttl`) и стирание кода после подтверждения; формулировки ошибок намеренно не подсказывают, существовал ли код раньше;
+  - `normalizeCode` принимает код с пробелами и дефисами.
+- `services/AuthService.java`:
+  - `register(...)` возвращает `VerificationStatusDto` и **не выдаёт токены**;
+  - `verifyEmail(...)` активирует аккаунт и возвращает `AuthResponse` (access + refresh);
+  - `resendVerificationCode(...)` — повторная отправка, ответ одинаковый для существующего и неизвестного e-mail (не подсказываем, зарегистрирован ли адрес);
+  - `login(...)` перехватывает `DisabledException` Spring Security и превращает в `AccountNotVerifiedException` (**403**, а не 401) — фронтенд по коду понимает «нужен PIN», а не «неверный пароль»;
+  - `refresh(...)` отзывает refresh-токен, если аккаунт не подтверждён.
+- `security/UserPrincipal.java`: `isEnabled()` читается из пользователя, поэтому неподтверждённый
+  аккаунт не проходит аутентификацию (`services/CustomUserDetailsService.java` не менялся —
+  он и раньше собирал `UserPrincipal` из всех флагов пользователя).
+- `exceptions/AccountNotVerifiedException.java` — 403 с человекочитаемым сообщением.
+- `rest/AuthController.java` + `config/SecurityConfig.java`: новые публичные ручки и разрешения.
+
+| Метод | URL | Ответ |
 |---|---|---|
-| Назначение | доказывать серверу при каждом запросе, кто ты | один раз в час-два получать новый Access |
-| Срок | `jwt.access-token-ttl` = 15 минут | `jwt.refresh-token-ttl` = 7 дней |
-| Где хранится у сервера | нигде (stateless, проверка подписи) | только **SHA-256-хэш** в таблице `refresh_tokens` |
-| Где передаётся | заголовок `Authorization: Bearer …` | только в теле `POST /api/auth/refresh` / `/logout` |
-| Подпись | HS512 (`jwt.secret`) | HS512 (`jwt.secret`) |
+| POST | `/api/auth/register` | `VerificationStatusDto` (без токенов) |
+| POST | `/api/auth/verify-email` | `AuthResponse` (токены выдаются здесь) |
+| POST | `/api/auth/verification-code` | `VerificationStatusDto` (повторная отправка PIN) |
+| POST | `/api/auth/login` | `AuthResponse`, **403** `AccountNotVerifiedException` для неподтверждённых |
+| POST | `/api/auth/refresh` | `AuthResponse`; при неподтверждённом аккаунте токен отзывается |
 
-Класс `security/JwtTokenProvider.java` — единственное место, где токен создаётся и разбирается.
-Claims: `sub` (e-mail), `uid` (id пользователя), `roles`, `typ` (`access` | `refresh`),
-`iat`, `exp`, `iss`.
+### Фронтенд
+- `api/auth.ts`: `register()` → `VerificationStatusDto`, добавлены `verifyEmail()` и `resendVerificationCode()`.
+- `context/AuthContext.tsx`: `register` больше не логинит (не трогает `user`), добавлен `verifyEmail`, который применяет токены и ставит пользователя.
+- `pages/RegisterPage.tsx`: после регистрации переход на `/verify-email` (если бэкенд ждёт PIN) или на `/login` (если подтверждение отключено конфигом); подсказка, что локально PIN печатается в консоли.
+- новый `pages/VerifyEmailPage.tsx` (публичный маршрут `/verify-email`): поле на 6 цифр, повторная отправка, вход в аккаунт сразу после подтверждения.
+- `pages/LoginPage.tsx`: при 403 сохраняет введённый e-mail и показывает ссылку «ввести PIN-код из письма».
 
-Ключевой момент безопасности: **refresh-токен не принимается как Access**. Фильтр смотрит claim
-`typ` и отказывает, если это refresh (`JwtAuthenticationFilterTest.refreshTokenInHeaderIsRejected`).
-Иначе украденный «долгий» токен стал бы универсальным пропуском на каждый запрос.
+### Конфигурация SMTP
+`secrets.properties` (и образец `secrets.properties.example`):
 
-### 4.2 Как запрос становится «аутентифицированным» (`OncePerRequestFilter`)
-
-`security/JwtAuthenticationFilter.java` выполняется на каждый запрос ровно один раз
-(гарантия `OncePerRequestFilter`) и делает 4 шага:
-
-1. достаёт заголовок `Authorization`, требует префикс `Bearer `;
-2. зовёт `JwtTokenProvider.parse(...)`: проверяется подпись, срок, издатель, тип токена;
-3. если всё хорошо — кладёт в `SecurityContextHolder` объект `UserPrincipal`
-   (реализует `UserDetails`, дополнительно хранит `id` и флаг `admin`) с ролями
-   `ROLE_USER` (+ `ROLE_ADMIN` для админа);
-4. если токен плохой — **не отдаёт ошибку сам**, а пишет причину в атрибут запроса
-   `RestAuthenticationEntryPoint.ATTR_JWT_ERROR` и пропускает запрос дальше.
-
-Почему «не отдаёт ошибку сам»: фильтр не знает, публичный это URL или нет. Решение «пускать или
-нет» принимает `SecurityFilterChain`. Поэтому публичный `GET /api/tshirts` с просроченным токеном
-всё равно отдаст товары, а защищённый `/api/orders/me` → 401 с человеческим текстом:
-«Срок access-токена истёк. Обновите сессию через /api/auth/refresh».
-
-Дальше Spring Security сам сопоставляет URL из `SecurityConfig` с ролями:
-`hasRole("ADMIN")`, `isAuthenticated()`, `permitAll()`.
-
-### 4.3 Логин
-
-`services/AuthService.login()`:
-
-1. `AuthenticationManager` + `DaoAuthenticationProvider` → `CustomUserDetailsService` грузит
-   пользователя, BCrypt сравнивает пароль;
-2. при неуспехе всегда один текст: **«Неверный e-mail или пароль»** — чтобы нельзя было
-   проверить существование аккаунта по ответу (`AuthServiceTest`, `CustomUserDetailsServiceTest`);
-3. при успехе: `JwtTokenProvider.createAccessToken()` + `RefreshTokenService.issue()`
-   (в ответ уходит новый refresh, в БД — его SHA-256-хэш, срок, `userId`, `revoked=false`).
-
-### 4.4 Ротация refresh-токена (главное, что стоит изучить)
-
-`security/RefreshTokenService.java` + `POST /api/auth/refresh`:
-
-```
-клиент: { "refreshToken": "<старый>" }
-сервер:  1) hash = SHA-256(<старый>)          // TokenHasher
-         2) ищет запись по hash; проверяет revoked=false и expiresAt > now
-         3) помечает СТАРЫЙ отзыв (revoke)    // это и есть ротация
-         4) выдаёт новый refresh + новый access
-клиент:  кладёт новую пару в localStorage и повторяет исходный запрос
+```properties
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=your.account@gmail.com
+MAIL_PASSWORD=пароль-приложения
+MAIL_FROM=noreply@clothes.shop
+VERIFICATION_ENABLED=true    # false — отключить подтверждение (только для разработки)
 ```
 
-Что это даёт на практике (проверено смоуком и `RefreshTokenServiceTest`):
-
-- старый refresh после обновления **не работает** (`401`);
-- refresh нельзя использовать вместо access;
-- `POST /api/auth/logout` отзывает refresh → сразу после этого refresh возвращает `401`;
-- при падении/закрытии браузера запись всё равно протухает по `expiresAt`, а
-  `services/RefreshTokenCleanupJob` (`@Scheduled`, `app.refresh-token.cleanup-*`) чистит мусор.
-
-Хэш вместо самого токена: если злоумышленник получит дамп таблицы `refresh_tokens`, он не сможет
-ими воспользоваться — SHA-256 необратим, а сам токен не восстанавливается из хэша.
-
-### 4.5 401 vs 403 и единый формат ошибки
-
-- `RestAuthenticationEntryPoint` — 401 «не представился» (нет токена / просрочен);
-- `RestAccessDeniedHandler` — 403 «представился, но нельзя» (user лезет в `/api/admin/**`);
-- оба возвращают `ApiError` JSON, а не HTML форму логина;
-- `exceptions/ApiExceptionHandler` (`@RestControllerAdvice`) собирает в один формат:
-  `Bean Validation` → 400 + `fields: {field: message}`, `NotFoundException` → 404,
-  `ConflictException` → 409 (дубликат e-mail), `InvalidCredentialsException`/`InvalidTokenException` → 401,
-  `AccessDeniedException` → 403, `MaxUploadSizeExceededException` → 413.
-
-Фронтенд печатает `message` и `fields` (`components/ApiErrorBox.tsx`), поэтому правила валидации
-живут в одном месте — в DTO на бэкенде.
+Для Gmail нужен именно «пароль приложения», а не пароль аккаунта. Пока `MAIL_HOST` пустой, приложение работает без почты и печатает PIN в лог — это штатный режим локальной разработки.
 
 ---
 
-## 5. Архитектура бэкенда
+## 4. Промокоды и скидки
 
-### 5.1 Слои и пакеты
+### Бэкенд
+- `entities/PromoCode.java` — таблица `promo_codes`: `code` (уникальный, 40), `discount_percent`, `active`, `expires_at` (null = бессрочный), `created_at`; методы `isExpiredAt(...)`, `isUsable(...)`.
+- `repositories/PromoCodeRepository.java` — производные методы `findFirstByCodeIgnoreCase`, `existsByCodeIgnoreCase`, `findAllByOrderByIdDesc` (Hibernate строит `upper(code) = upper(?)`, поэтому регистр не важен и в MySQL, и в H2 на тестах).
+- `services/PromoCodeService.java`:
+  - CRUD для админа; код нормализуется в верхний регистр; при пустом коде админа генерируется 8-символьный из алфавита без похожих знаков (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`, без `O/0`, `I/1`);
+  - проверка покупателя `validate(PromoValidationRequest)`: код обязан существовать, быть включённым и не просроченным; суммы (`TotalsDto`) считаются **по ценам из базы**, а не по присланным фронтендом;
+  - `resolveOrNull(code)` для заказа: пустой код → `null` (скидки нет), неверный → `InvalidRequestException` с причиной («не найден», «выключен администратором», «срок действия истёк»).
+- `dto/TotalsDto.java` — `subtotal`, `discountPercent`, `discountAmount`, `total`; округление `BigDecimal`/`HALF_UP` до 2 знаков, итог не может быть отрицательным.
+- `entities/Order.java` — новые поля `promo_code` и `discount_percent`: в заказ кладётся **слепок** (строка и процент на момент покупки), а не ссылка на `PromoCode`, иначе переименование или удаление кода изменило бы историю уже оплаченных заказов.
+- `services/OrderService.java` — перед сохранением заказа вызывает `promoCodeService.resolveOrNull(...)`, сохраняет слепок; суммы заказа считает `mapper/OrderMapper.java` через `TotalsDto.of(...)` из цен, лежащих в позициях заказа.
+- `dto/OrderDto.java` — добавлены `promoCode`, `discountPercent`, `discountAmount`, `total`.
+- контроллеры: `rest/PromoCodeController.java` (`POST /api/promo-codes/validate`, авторизованные пользователи) и `rest/AdminPromoCodeController.java` (`GET/POST/PUT/DELETE /api/admin/promo-codes`, доступ только `ADMIN`).
+
+### Фронтенд
+- новый `hooks/usePromo.ts` — вся логика: запрос валидации на сервер, повторная валидация при изменении состава корзины (подпись из id товаров), состояния `applied/error/busy`, хранение введённого кода.
+- `context/CartContext.tsx` — в `localStorage` сохраняется **только строка кода** (`clothes.promo`); проценты и суммы никогда не берутся из локального хранилища.
+- новый `components/PromoCodeBox.tsx` — форма ввода кода + `PromoTotals` (подытог, скидка, к оплате).
+- `pages/CartPage.tsx` и `pages/CheckoutPage.tsx` — блок промокода, суммы с сервера, `promoCode` в теле `POST /api/orders`.
+- новый `components/OrderTotals.tsx` — единый блок сумм («Товары / Промокод −N% / Итого») для карточки заказа; `pages/OrderDetailsPage.tsx` больше не складывает цены сам.
+- `pages/admin/AdminOrdersPage.tsx` — колонка суммы берётся из `order.total`, под ней подпись промокода и скидки.
+- новые страницы админки: `pages/admin/AdminPromoCodesPage.tsx` (список, удаление, флеш-сообщения) и `pages/admin/PromoCodeFormPanel.tsx` (создание/правка; код можно оставить пустым — сгенерирует сервер; срок действия в `datetime-local` конвертируется в ISO `Instant`).
+- `App.tsx`: маршрут `/admin/promo-codes` (только `ADMIN`), в шапке ссылка «Промокоды».
+
+Пример проверки со стороны клиента:
 
 ```
-rest/        @RestController: только DTO на вход/выход, никаких сущностей, никакой бизнес-логики
-services/    бизнес-правила, транзакции (@Transactional), валидация бизнес-смысла
-mapper/      сущность → DTO (и обратно для форм)
-repositories/ Spring Data JPA (JpaRepository + JpaSpecificationExecutor)
-entities/    JPA-сущности (только внутри сервера)
-dto/         records-DTO + ApiError + PageResponse
-security/    JWT: провайдер, фильтр, principal, refresh-механика, хэширование
-config/      SecurityConfig, AuthenticationConfig, Cors, Jwt/AdminProperties, OpenApi
-specification/ Criteria-предикаты для фильтров каталога
-exceptions/  ApiException + ApiExceptionHandler
+POST /api/promo-codes/validate
+{ "code": "sale2024", "tshirtIds": [12, 31] }
+
+→ { "code": "SALE2024", "discountPercent": 15, "expiresAt": null,
+    "totals": { "subtotal": 3980.0, "discountPercent": 15,
+                "discountAmount": 597.0, "total": 3383.0 },
+    "message": "Промокод SALE2024 применён: скидка 15%" }
 ```
 
-Правило «контроллер отдаёт только DTO» дало два приятных эффекта: (1) ленивые связи не
-вылезают в JSON (`LazyInitializationException` больше не возможен), (2) поле `password`
-физически не попадает в ответ.
+---
 
-### 5.2 Каталог: фильтры, сортировка, пагинация
+## 5. Избранное и профиль
 
-`GET /api/tshirts?size=M&available=true&sort=PRICE_DESC&page=0&pageSize=12`
+### Бэкенд
+- `entities/User.java` — `favorites` (`ManyToMany` с `TShirt`, таблица-связка `user_favorites`
+  с колонками `user_id` и `tshirt_id`, `FetchType.LAZY`). Связь односторонняя: `TShirt` не знает о
+  пользователях, иначе ленивые загрузки и сериализация начали бы «ходить» по кругу.
+- новый `services/FavoriteService.java`:
+  - владелец берётся **только** из principal из токена (id пользователя не передаётся в запросе);
+  - `list`, `favoriteIds` (легкий ответ для отрисовки сердечек), `add` (идемпотентен), `remove`;
+  - скрытый товар (`is_disabled`) в избранное добавить нельзя;
+  - `remove` сравнивает по `getId().equals(id)`, а не объекты: у `TShirt` нет `equals/hashCode`, а сравнение прокси-объектов Hibernate ненадёжно;
+  - методы помечены `@Transactional`, иначе lazy-коллекция `favorites` «потечёт» вне сессии (`spring.jpa.open-in-view=false`).
+- новый `rest/FavoriteController.java`:
 
-- `specification/TShirtSpecifications` собирает `Specification<TShirt>` из непустых параметров —
-  один запрос к БД вместо набора `if` в разных методах репозитория;
-- `services/TShirtSort` — перечисление с белым списком (`NEWEST`, `OLDEST`, `PRICE_ASC`, `PRICE_DESC`,
-  `NAME_ASC`); неизвестное значение = `NEWEST`. Клиент не может попросить сортировку по
-  произвольной колонке (это и дыра, и способ уронить БД);
-- `services/TShirtService.clampPageSize` ограничивает `pageSize` (макс. 50), чтобы запрос
-  `?pageSize=1000000` не вытаскивал всю таблицу;
-- `dto/PageResponse` — плоский JSON `{content, page, size, totalElements, totalPages, last}`,
-  фронтенд по нему строит пагинацию;
-- флаг `includeDisabled=true` учитывается **только если токен админский**
-  (`principal.isAdmin()` в контроллере), иначе скрытые товары не видны.
-
-### 5.3 Товары, картинки, мягкое удаление
-
-- `POST|PUT /api/tshirts` принимают `multipart/form-data`: часть `data` — JSON
-  (`@RequestPart("data") TShirtFormRequest`), часть `files` — картинки (до 5, каждая до 5 МБ).
-  Так валидация DTO работает так же, как для обычного JSON;
-- `services/ImageUploadPolicy` проверяет количество файлов (≤ 5), размер (≤ 5 МБ), MIME из
-  белого списка и **реальное содержимое**: `looksLikeImage` сравнивает «магические числа»
-  (PNG/JPEG/GIF/RIFF+WEBP), поэтому `shell.exe` с MIME `image/png` не пройдёт;
-- байты картинок лежат в таблице `images.bytes` (`@Lob byte[]`, колонка `longblob`), отдают их
-  `ImageController` + `ImageService`. Чтобы не долбить БД при каждой отрисовке превью,
-  `ImageController` ставит `Cache-Control: max-age=7 days, public` — повторные показы
-  браузер берёт из кэша. В `<img src>` URL публичный —
-  токен браузер к `<img>` не подмешивает;
-- после загрузки картинки явно сохраняются и делают `flush()`, чтобы получить id до того,
-  как выбирается превью и формируется ответ (иначе `previewImageId` был бы `null`);
-- `DELETE /api/tshirts/{id}` — **мягкое** удаление: `disabled=true` + `available=false`.
-  Жёсткий `DELETE` разбивается о внешний ключ `order_tshirts`: товар уже участвует в заказах,
-  историю заказов ломать нельзя. Скрытый товар исчезает из каталога и из карточки (`404`),
-  но остаётся в заказах.
-
-### 5.4 Эндпоинты (проверено `scripts/smoke-test.sh`)
-
-| Метод, URL | Кто | Примечание |
+| Метод | URL | Ответ |
 |---|---|---|
-| `POST /api/auth/register` | все | 201 + пара токенов; дубликат e-mail → 409 |
-| `POST /api/auth/login` | все | 200 + пара токенов; неверные данные → 401 с одинаковым текстом |
-| `POST /api/auth/refresh` | владелец refresh | ротация: старый отзывается |
-| `POST /api/auth/logout` | владелец refresh | 204, refresh отозван |
-| `GET /api/auth/me` | авторизованные | профиль из токена |
-| `GET /api/tshirts` | все | фильтры/сортировка/пагинация |
-| `GET /api/tshirts/sizes` | все | список размеров для фильтра |
-| `GET /api/tshirts/{id}` | все | карточка + галерея; скрытый/несуществующий → 404 |
-| `POST /api/tshirts` | ADMIN | 201, multipart |
-| `PUT /api/tshirts/{id}` | ADMIN | частичная загрузка картинок |
-| `PATCH /api/tshirts/{id}/preview/{imageId}` | ADMIN | смена превью |
-| `DELETE /api/tshirts/{id}` | ADMIN | 204, мягкое удаление |
-| `GET /api/images/{id}` | все | бинарник + `Content-Type` |
-| `DELETE /api/images/{id}` | ADMIN | картинка + переназначение превью |
-| `POST /api/orders` | авторизованные | 201; пользователь берётся из токена |
-| `GET /api/orders/me` | авторизованные | пагинация |
-| `GET /api/orders/{id}` | авторизованные | свой заказ; чужой → 403 |
-| `GET /api/admin/orders` | ADMIN | все заказы |
-| `PATCH /api/admin/orders/{id}/status` | ADMIN | `{ "status": "DELIVERED" }` |
-| `GET /api/admin/orders/statuses` | ADMIN | значения enum для селекта |
-| `GET /api/admin/users` | ADMIN | список пользователей |
+| GET | `/api/favorites` | список `TShirtDto` |
+| GET | `/api/favorites/ids` | `number[]` |
+| POST | `/api/favorites/{tshirtId}` | 204 |
+| DELETE | `/api/favorites/{tshirtId}` | 204 |
 
-### 5.5 Заказ: как считается итог
+- `config/SecurityConfig.java`: `/api/favorites/**` и `/api/promo-codes/**` явно требуют аутентификации.
 
-`services/OrderService.create()`:
-
-- пользователь **берётся из токена** (`UserPrincipal`), а не из тела запроса — нельзя «оформить
-  на другого»;
-- позиции: список `tshirts` (связь M—N через `order_tshirts`), но `OrderService` сначала
-  схлопывает `tshirtIds` в `LinkedHashSet`, поэтому одна позиция на товар; отсутствующие или
-  снятые с продажи товары → `404`/`400`;
-- цены берутся из БД на момент оформления, поэтому «подправить цену» во фронтенде нельзя;
-- статус `PROCESSING` по умолчанию, меняет его только админ.
+### Фронтенд
+- новый `context/FavoritesContext.tsx` — состояние избранного, привязанное к аккаунту: `ids`, `loaded`, `isFavorite`, `toggle`, `reload`, `error`, `dismissError`; загрузка при смене пользователя; у гостя список пуст; переключение **оптимистичное** (сердечко реагирует сразу, при ошибке — откат и текст ошибки).
+- новый `components/FavoriteButton.tsx` — сердце (outline/filled) с `preventDefault/stopPropagation`, чтобы клик по сердцу не вёл на страницу товара.
+- `components/ProductCard.tsx` и `pages/ProductPage.tsx` — сердце поверх изображения; состояние синхронно в каталоге, на странице товара и в профиле.
+- новый `components/FavoritesNotice.tsx` — сообщение об ошибке избранного (гость → подсказка «войти» + крестик), один компонент для каталога, карточки товара и профиля.
+- новый `pages/ProfilePage.tsx` — маршруты `/profile` с вкладками «Мои заказы» / «Избранное»; активная вкладка живёт в URL (`/profile?tab=favorites`), поэтому работает обнов страницы и прямые ссылки; у вкладки «Избранное» — счётчик.
+- новые/изменённые компоненты: `components/OrdersPanel.tsx` (общий список заказов для `/orders` и профиля, суммы из DTO), `components/FavoritesPanel.tsx` (список избранных карточек; фильтрация по `ids` из контекста — при снятии из избранного карточка исчезает без повторного запроса), `components/OrderTotals.tsx`.
+- `components/Header.tsx`: имя пользователя стало ссылкой на `/profile`, добавлены пункты «Профиль», «Мои заказы», админу — «Промокоды».
+- `pages/OrdersPage.tsx` упрощён до обёртки над `OrdersPanel` (меньше дублирования, −69 строк).
 
 ---
 
-## 6. База данных: что изменилось
+## Изменения в базе данных
 
-Таблицы **не удалялись**. `spring.jpa.hibernate.ddl-auto=update` только добавил новую таблицу
-и колонки:
+`spring.jpa.hibernate.ddl-auto=update`, поэтому при следующем старте приложения Hibernate сам добавит **только новые объекты**, ничего не удаляя:
 
-- `refresh_tokens` — новая (`token_hash` unique, `user_id`, `expires_at`, `revoked`, `issued_at`);
-- `tshirts.disabled` — использована существующая колонка для мягкого удаления;
-- из `User` убрано дублирующее поле `order` (связь оставлена одна: `Order.user`),
-  но **колонка `users.order_id` в MySQL осталась** — я не удаляю колонки и таблицы
-  без явного разрешения, это можно сделать отдельной миграцией, когда проверите, что данные там не нужны;
-- первичные ключи в сущностях переведены с `int` на `Long` (см. раздел 10), колонки в MySQL
-  остались `int` — Hibernate переносит тип корректно, новых миграций не требовалось.
-
-Связи: `users 1—N refresh_tokens`, `users 1—N orders`, `tshirts M—N orders` (`order_tshirts`),
-`tshirts 1—N images`. Из `User` убрано дублирующее поле `order`: в старом коде одна и та же связь
-была описана дважды (и `User.order`, и `Order.user`) — осталась одна, `Order.user`.
-
----
-
-## 7. Безопасность: что реально закрыто
-
-1. **Сессий нет**: `SessionCreationPolicy.STATELESS`, CSRF выключен (он нужен для cookie-сессий,
-   а токен в заголовке подделать через CSRF нельзя).
-2. **Подпись HS512**, секрет ≥ 64 символов; `JwtProperties` отказывает при коротком секрете.
-3. **Access ≠ Refresh**: проверка claim `typ`.
-4. **Refresh одноразовый** (ротация) + хранится хэш, а не токен.
-5. **Logout отзывает** refresh — украденный токен перестает работать.
-6. **BCrypt** (`BCryptPasswordEncoder`) — пароль не хранится и не логируется.
-7. **Одинаковый текст** при «нет такого e-mail» и «неверный пароль».
-8. **Защита от перебора id**: `GET /api/orders/{id}` проверяет владельца (`403` на чужой заказ).
-9. **CORS** — конкретный origin + разрешённые заголовки/методы, а не `*`.
-10. **Загрузка файлов**: MIME + реальная сигнатура байтов + лимит 5 файлов × 5 МБ + лимиты
-    сервера (`max-file-size`/`max-request-size`).
-11. **Swagger** доступен, но в проде его стоит закрыть паролем или отключить
-    (`springdoc.api-docs.enabled=false`).
-
-Чего сознательно **нет** (и это стоит знать): нет rate-limit на `/api/auth/login`, нет blacklist
-для отозванных access-токенов (access живёт 15 минут), нет 2FA, нет.refresh-кражи-детекта
-(если украденный refresh используют одновременно с владельцем, вторая попытка даст 401, но
-цепочка «кто украл» не анализируется).
-
----
-
-## 8. Фронтенд: как устроен и как общается с API
-
-### 8.1 Маршруты
-
-```
-/catalog, /product/:id, /login, /register, /cart          — публичные
-/checkout, /orders, /orders/:id                            — <ProtectedRoute>
-/admin/products, /admin/products/edit/:id,
-/admin/orders, /admin/users                                — <ProtectedRoute adminOnly>
-*                                                          — NotFound
-```
-
-`ProtectedRoute` — UX (не пустой экран вместо серии 401), настоящая проверка — на сервере.
-Перед логином запоминаем, куда шёл пользователь (`location.state.from`), и возвращаем его туда.
-
-### 8.2 Интерцепторы axios (`src/api/http.ts`) — сердце фронтенда
-
-```
-request:  если есть access-токен -> config.headers.Authorization = "Bearer <token>"
-response: 401 и это не /auth/* и запрос ещё не повторяли
-          -> refreshOnce()  (один общий Promise на все параллельные 401)
-          -> сохранить новую пару токенов
-          -> повторить исходный запрос с новым access
-          -> если refresh не удался: clearTokens() + onSessionLost() -> /login
-```
-
-Два важных уточнения для понимания:
-
-- **shared promise** (`refreshInFlight`): если 5 запросов упали с 401 одновременно, refresh
-  выполняется один раз, а не пять. Иначе ротация «съела бы» только что выданный refresh
-  и часть запросов отвалилась бы;
-- refresh идёт через **отдельный axios-инстанс без интерцепторов**, иначе 401 на сам
-  `/auth/refresh` вызвал бы рекурсию.
-
-### 8.3 Восстановление сессии при открытии страницы
-
-`AuthContext` на монтировании смотрит: есть ли refresh в `localStorage` → просим `GET /api/auth/me`.
-Если access уже протух — интерцептор сам обновит пару и повторит запрос, поэтому пользователь
-остаётся залогиненным после перезагрузки/повторного открытия браузера.
-
-### 8.4 Корзина
-
-`CartContext` хранит `[{id, name, size, price, previewImageId}]` в `localStorage`.
-Количеств нет: позиция = товар (сервер схлопывает дубликаты `tshirtIds` в `LinkedHashSet`),
-поэтому дубликаты отсекаются и здесь,
-и в `OrderService`. Итог «для глазами» считается во фронтенде, финальный — на сервере по ценам из БД.
-
-### 8.5 Catalog и фильтры
-
-Фильтры живут в query-параметрах URL (`?size=M&sort=PRICE_DESC&page=1`): ссылку можно сохранить
-и отправить, кнопка «назад» работает как в обычном сайте. При смене фильтра страница
-сбрасывается на первую, параллельные ответы защищаются флагом `alive` (результат устаревшего
-запроса не перетирает новый).
-
-### 8.6 Картинки
-
-Везде `<img src="/api/images/{id}">`: эндпоинт публичный, токен не нужен (браузер его к `<img>`
-не приложит). Метаданные галереи приходят из `TShirtDetailsDto.images`, там же флаг `previewImage`.
-
-### 8.7 Обработка ошибок и загрузки
-
-`ApiRequestError` (наш класс) несёт `status`, `message`, `fields` — `ApiErrorBox` рисует общее
-сообщение и полевые подсказки. Экраны показывают `Spinner` на время запроса; при недоступном
-бэкенде сообщение «Сервер недоступен. Проверьте, запущен ли бэкенд».
-
-### 8.8 Стили
-
-Вместо россыпи старых файлов (`basket.css`, `delete.css`, `cartlayout.css` и т.д. из
-`_legacy_thymeleaf/static/`) — 3 файла: `tokens.css` (CSS-переменные и сброс), `layout.css`
-(шапка, сетка, каркас), `components.css` (кнопки, поля форм, карточки, бейджи, алерты) и
-`pages.css` (таблицы админки, корзина, оформление, карточка товара, галерея, пагинация,
-спиннер) — каждый файл до 400 строк, как требует `AGENTS.md`.
-Визуальный стиль стал нейтральным «магазином»: карточки с превью 3:4, бейджи наличия и статусов
-заказа, адаптив через `grid-template-columns: repeat(auto-fill, minmax(...))`.
-
----
-
-## 9. Тесты: 80 автотестов и 19 HTTP-сценариев
-
-### 9.1 unit (JUnit 5 + Mockito, без БД)
-
-| Тест | Что доказывает |
+| Объект | Что именно |
 |---|---|
-| `JwtTokenProviderTest` (8) | access/refresh имеют разный TTL и claim `typ`; просроченный невалиден; чужая подпись отклонена; claims содержат `uid`, e-mail, роли |
-| `TokenHasherTest` (4) | SHA-256 детерминирован, различает похожие токены, длина 64 hex |
-| `RefreshTokenServiceTest` (10) | выпуск/проверка, отзыв, **ротация** (старый перестаёт действовать), отозванный/истёкший → отказ, очистка устаревших |
-| `JwtAuthenticationFilterTest` (6) | Bearer access → аутентификация с ролями; refresh в заголовке → отказ; просроченный → подсказка про `/api/auth/refresh`; поддельная подпись → анонимность; `Basic …` не принимается; без заголовка запрос идёт дальше |
-| `AuthServiceTest` (8) | регистрация: 409 на дубликат e-mail, роль USER по умолчанию; логин: нормальные данные дают пару токенов, неверные — 401 с одним и тем же текстом |
-| `UserServiceTest` (8) | поиск по e-mail/id, 404 на отсутствие, `UserDto` без пароля, админ-наследование ролей |
-| `OrderServiceTest` (13) | заказ привязан к пользователю из токена; дубликаты позиций схлопываются; адрес обрезается/нормализуется; `pageSize` ограничен; свои заказы видит только владелец; админ может любой заказ; смена статуса |
-| `TShirtServiceTest` (16) | сортировка по белому списку и защита от `price; drop table…`; `pageSize`/`page`; скрытый товар не отдаётся; создание назначает превью и id картинок; нормализация имени/размера; >5 файлов / >5 МБ / `shell.exe` / файл-подделка «image/png» с EXE-байтами → 400; превью сохраняется при правке; мягкое удаление без `delete()`; картинка из другого товара недоступна |
-| `CustomUserDetailsServiceTest` (3) | id/роли попадают в `UserDetails`; у админа 2 роли; неизвестный пользователь → тот же текст ошибки |
+| таблица `promo_codes` | `id`, `code` (UNIQUE, 40), `discount_percent`, `active`, `expires_at`, `created_at` |
+| таблица `user_favorites` | `user_id`, `tshirt_id` — связка «пользователь ↔ избранный товар» |
+| таблица `orders` | новые колонки `promo_code` (40) и `discount_percent` — обе nullable |
+| таблица `users` | новая колонка `verification_code_sent_at` — nullable |
 
-### 9.2 интеграция
-
-`AppShopRunTest` (`@SpringBootTest`): контекст стартует, бины безопасности в единственном числе
-(ловит конфликты имён вроде старого `SecurityConfig`), `jwt.*` прочитаны из конфига,
-таблица `refresh_tokens` читается.
-
-### 9.3 Смоук на реальный HTTP (`scripts/smoke-test.sh`)
-
-19 групп проверок: гость видит каталог; гость не видит `/api/orders/me` (401); регистрация (201);
-дубликат e-mail (409); неверный пароль (401); кривой e-mail (400); `/me` по access;
-refresh даёт новую пару; старый refresh после ротации (401); refresh как access (401);
-user не создаёт товар (403); логин админа; multipart-создание товара с настоящей картинкой (201);
-поддельная картинка (EXE-байты с MIME `image/png`) → 400; гость видит карточку и картинку (200);
-заказ (201); заказ несуществующего товара (404); пустая корзина (400); свои заказы (200) и
-чужие/админские (403); админ видит все заказы и меняет статус (200); logout (204) и
-последующий refresh (401); мягкое удаление (204 → 404 → 404).
+Существующие колонки и таблицы не менялись и не удалялись: колонка `users.verification_code`
+sуществовала и раньше, добавлена только отметка времени выдачи кода. Существующие заказы и
+пользователи остаются рабочими: новые поля у старых строк = `NULL`, а `OrderMapper` трактует
+отсутствующий процент как 0.
 
 ---
 
-## 10. Найденные баги и как они были исправлены
+## Тесты: результаты
 
-Это самые полезные места для самостоятельного чтения.
+Фронтенд (`cd frontend && npm run build`): `tsc --noEmit` без ошибок (строгий режим + `noUnusedLocals`), Vite-сборка успешна — `dist/assets/index-*.css 15.50 kB` (gzip 3.67 kB), `dist/assets/index-*.js 282.27 kB` (gzip 91.70 kB).
 
-1. **`Could not create query for ImageRepository.countByTShirtId`** — Spring Data не смог
-   разобрать `TShirtId` для поля `Image.tShirt`. Решение: явный JPQL в
-   `repositories/ImageRepository.java` (`findAllByTShirt`, `countByTShirt` с `@Param`).
-   Учить: у производных имён методов есть пределы применимости; при вложенных связях надёжен JPQL.
-2. **`ClassCastException: Long cannot be cast to Integer`** при создании заказа — репозитории
-   объявлены как `JpaRepository<Entity, Long>`, а в сущностях поле id было `int`.
-   Решение: id в `TShirt`, `Image`, `Order`, `User` → `Long`; `TShirt.previewImageId` остался `int`
-   (колонка в MySQL `int`), для него используется `Math.toIntExact(...)`.
-3. **`previewImageId` был `null` в ответе** — id картинок ещё не были присвоены.
-   Решение: в `TShirtService.attachImages` явные `saveAll(...)` + `flush()` до выбора превью.
-4. **Все ошибки превращались в 401** — Spring форвардит обработчик ошибок на `/error`,
-   а `/error` не был разрешён в `SecurityFilterChain`. Решение: `.requestMatchers("/error").permitAll()`.
-5. **`DELETE /api/tshirts/{id}` → 409/500** из-за внешнего ключа `order_tshirts`.
-   Решение: мягкое удаление (`disabled` + `available=false`) и фильтрация скрытых в `getOrThrow`.
-6. **Заказ возвращал 500, а не понятную ошибку** — не хватало проверок «товара нет»/«корзина пуста».
-   Решение: `NotFoundException`/`InvalidRequestException` в `OrderService`, в смоуке зафиксировано `404`/`400`.
-7. **Некорректные HTTP-статусы**: создание товара возвращало 200 → добавлен
-   `@ResponseStatus(HttpStatus.CREATED)`; удаление возвращало JSON-«ок» → `ResponseEntity<Void>` + `204`.
-8. **UTF-8 в смоук-тесте (Windows)**: curl из Git Bash отправлял кириллицу байтами, которые
-   Jackson не мог прочитать (`Invalid UTF-8 middle byte 0xe5`). В смоук-тестах payloads ASCII;
-   в реальном UI проблема не возникает (axios всегда шлёт корректный UTF-8 JSON).
-   Учить: кодировки в цепочке «терминал → curl → сервер» надо контролировать явно.
-9. **Временные файлы в `/tmp`** ломались у Node на Windows — временные каталоги смоука
-   перенесены в `target/smoke-*`, пути для curl конвертируются `cygpath -w`.
-10. **Состояние в контроллере** (старая ошибка: `currentSize` в бине-синглтоне) — из-за этого
-    фильтры «перетекали» между запросами разных пользователей. Решение: фильтры полностью
-    в параметрах запроса + `Specification`; во фронтенде — query-параметры URL.
+Бэкенд (`bash scripts/mvn.sh -o test -Dtest='!AppShopRunTest' -DfailIfNoTests=false`): **130 тестов, 0 падений, 0 ошибок**, BUILD SUCCESS.
+
+| Тест | Кол-во | Что покрывает |
+|---|---|---|
+| `ApplicationContextSmokeTest` (новый, H2) | 5 | старт контейнера без MySQL: новые бины и контроллеры на месте, `@ConfigurationPropertiesScan` подобрал `VerificationProperties`/`AppMailProperties`, `EmailSender.isSmtpConfigured() == false`, таблица `promo_codes` читается |
+| `PromoCodeRepositoryTest` (новый, H2) | 4 | derived-запросы с `IgnoreCase`, уникальность `code` на уровне БД, порядок «сначала свежие» |
+| `EmailVerificationServiceTest` (новый) | 7 | формат PIN из 6 цифр, активация, срок жизни кода, сообщения без утечки «был/не был код» |
+| `FavoriteServiceTest` (новый) | 8 | идемпотентность добавления, удаление по id, запрет скрытых товаров, владелец из principal |
+| `PromoCodeServiceTest` (новый) | 12 | CRUD, формат сгенерированного кода, защита от дублей, отказ просроченных/выключенных/неизвестных кодов, пересчёт сумм по ценам из БД |
+| `AuthServiceTest` (обновлён) | 13 | регистрация без токенов, подтверждение PIN, повторная отправка, 403 для неподтверждённого входа, отзыв refresh |
+| `OrderServiceTest` (обновлён) | 17 | слепок промокода в заказе, заказ без скидки, ошибка при неверном коде |
+| `TShirtServiceTest` (обновлён) | 23 | скрытый товар не виден публично, виден админу, редактируется, `restore` возвращает в продажу |
+| остальные (security, users, images) | 49 | регрессия прежних блоков |
+
+`AppShopRunTest` (требует MySQL) я не запускал — он стартует приложение на вашей рабочей БД и применит DDL из раздела выше.
 
 ---
 
-## 11. Слабые места и что изучить дальше
+## Что стоит открыть и изучить самостоятельно
 
-Что стоит открыть и прочитать в первую очередь:
+1. **`src/main/java/com/example/appShop/services/EmailSender.java` + `services/EmailVerificationService.java`**
+   Ключевая идея всего блока подтверждения: `JavaMailSender` — бин с условным автоконфигурированием (`MailSenderAutoConfiguration` создаёт его только при непустом `spring.mail.host`). Поэтому проверка `ObjectProvider<JavaMailSender>` + возврат `false` даёт «деградацию без падения»: приложение работает и без почты, а PIN попадает в лог. Сравните с тем, как `AuthService.login` перехватывает `DisabledException` — это тот же приём: низкоуровневый факт переводим в понятный HTTP-ответ.
 
-1. `security/JwtAuthenticationFilter.java` + `config/SecurityConfig.java` — как запрос
-   проходит путь «заголовок → `SecurityContextHolder` → проверка прав». Это ядро миграции.
-2. `security/RefreshTokenService.java` + `security/TokenHasher.java` — ротация и хранение хэша;
-   сравните с `JwtAuthenticationFilterTest` и `RefreshTokenServiceTest`, чтобы понять,
-   какие именно атаки это закрывает.
-3. `frontend/src/api/http.ts` — интерцепторы и shared-promise refresh; без понимания этой схемы
-   непонятно, почему пользователь «не замечает» истечения access-токена.
-4. `specification/TShirtSpecifications.java` + `services/TShirtSort.java` — как строится
-   безопасная фильтрация/сортировка вместо «ручных» if в контроллере.
+2. **`src/main/java/com/example/appShop/services/PromoCodeService.java` + `dto/TotalsDto.java` + `mapper/OrderMapper.java`**
+   Здесь видно, как в проекте проходит граница «фронтенду не доверяем»: клиент присылает только id товаров и строку кода, а подытог, скидку и итог считает сервер (и то же самое делает при создании заказа). Обратите внимание на `BigDecimal`/`RoundingMode.HALF_UP` в `TotalsDto` — обычное `double`-складывание дало бы копейки погрешности в суммах заказа.
 
-Что не сделано и почему (осознанные упрощения):
+3. **`frontend/src/context/FavoritesContext.tsx` и `frontend/src/hooks/usePromo.ts`**
+   Первый показывает оптимистичное обновление UI с откатом при ошибке, второй — что клиент хранит только код промокода, а суммы всегда приходят с сервера. Сравните с `context/CartContext.tsx`: корзина живёт в `localStorage`, избранное — в MySQL, отсюда и разная стратегия.
 
-- **Токены в `localStorage`** (а не в `httpOnly`-cookie): любой XSS их читает.
-  Усиление: refresh в `httpOnly`+`SameSite=Lax` cookie, access только в памяти JS,
-  cookie-based `/api/auth/refresh` + CSRF-подтверждение. Фронтенд это переживёт спокойно —
-  менять нужно только `auth/tokenStorage.ts` и `api/http.ts`.
-- **Нет отзыва access-токенов**: access живёт 15 минут и отозвать его нельзя.
-  Усиление: более короткий TTL + blacklist в Redis по `jti`, либо `token_version` в таблице `users`.
-- **Нет rate-limit и блокировок** на `/api/auth/login` (подбор пароля не тормозится).
-  Усиление: `Bucket4j`/фильтр + `AUTH_FAILURE` счётчик, CAPTCHA.
-- **Картинки в БД (`images.bytes longblob`)**: каждое попадание мимо браузерного кэша читает BLOB из MySQL.
-  Усиление: файловое хранилище/S3, в БД — путь и content-type, плюс `ETag`/CDN.
-- **Количества товара нет** (Set вместо List): если понадобится «2 штуки одного размера»,
-  придётся менять `Order.tshirts` на промежуточную сущность `OrderItem` с колонкой `quantity`
-  и чинить схему БД (это уже миграция, а не `ddl-auto=update`).
-- **Нет редактирования профиля и смены пароля**, нет писем для восстановления пароля.
-- **Тесты контроллеров не через MockMvc**: проверены фильтр+сервисы+контекст. Следующий шаг —
-  `MockMvcTester`/`@WebMvcTest` со `@WithMockUser` для проверки связки URL↔роли в `SecurityConfig`
-  (сейчас права подтверждает только смоук-тест на живой HTTP).
-- **Нет миграций (Flyway/Liquibase)**: схема «чинится» `ddl-auto=update`, что нормально для учёбы
-  и опасно для прода. Следующий шаг: `flyway-core` + `db/migration/V1__baseline.sql`.
-- **Логирование и мониторинг**: только `System.out`-лог Spring. Стоит добавить `logback`-файл,
-  `traceId` в MDC и метрики Actuator (и закрыть `/actuator/**`).
-- **Frontend-роуты не ленивые** (`React.lazy` убрал из плана ради простоты): при росте числа
-  страниц стоит разделить бандл (сейчас 260 КБ / 85 КБ gzip).
+## Известные ограничения / что дальше
 
----
-
-## 12. Справочник файлов и команд
-
-### Бэкенд (ключевые файлы)
-
-```
-src/main/java/com/example/appShop/
-  config/       SecurityConfig, AuthenticationConfig, CorsProperties, JwtProperties,
-                AdminBootstrapProperties + AdminBootstrapRunner, OpenApiConfig
-  security/     JwtTokenProvider, JwtAuthenticationFilter, RefreshTokenService, TokenHasher,
-                UserPrincipal, TokenType, Roles, RestAuthenticationEntryPoint, RestAccessDeniedHandler
-  services/     AuthService, UserService, TShirtService, ImageService, OrderService,
-                CustomUserDetailsService, TShirtSort, ImageUploadPolicy, RefreshTokenCleanupJob
-  rest/         AuthController, TShirtController, ImageController, OrderController,
-                AdminOrderController, AdminUserController
-  dto/          16 records (+ ApiError, PageResponse)
-  mapper/       UserMapper, TShirtMapper, OrderMapper
-  repositories/ UserRepository, TShirtRepository, ImageRepository, OrderRepository,
-                RefreshTokenRepository
-  entities/     User, TShirt, Image, Order, RefreshToken
-  specification/TShirtSpecifications
-  exceptions/   ApiException + NotFound/Conflict/InvalidRequest/InvalidCredentials/InvalidToken
-                + ApiExceptionHandler
-src/main/resources/application.properties
-src/test/java/com/example/appShop/…            10 тестовых классов, 80 тестов
-```
-
-### Конфигурация и скрипты
-
-```
-secrets.properties.example / secrets.properties   JWT_SECRET, ADMIN_EMAIL, ADMIN_PASSWORD
-scripts/env.sh            локальный JDK + Maven (в PATH их нет)
-scripts/mvn.sh            mvn с нужным JAVA_HOME
-scripts/run-backend.sh    запуск бэкенда + ожидание "Started AppShopRun" (лог target/backend.log)
-scripts/stop-backend.sh   остановка по порту 8080 + снятие PID из target/backend-mvn.pid
-scripts/smoke-test.sh     19 HTTP-сценариев (curl + node для разбора JSON)
-_legacy_thymeleaf/        старый UI и старые @Controller (сохранены, не участвуют в сборке)
-```
-
-### Чек-лист «свежий разработчик»
-
-```bash
-cp secrets.properties.example secrets.properties
-bash scripts/run-backend.sh
-curl -s localhost:8080/api/tshirts | head -c 200
-curl -s -X POST localhost:8080/api/auth/login \
-     -H 'Content-Type: application/json' \
-     -d '{"email":"admin@clothes.shop","password":"SuperSecret123"}' | head -c 200
-cd frontend && npm install && npm run dev      # http://localhost:5173
-bash scripts/stop-backend.sh                    # когда закончили
-```
-
-### Что где смотреть в браузере
-
-- Swagger: `http://localhost:8080/swagger-ui.html` (можно «погонять» API руками);
-- Фронтенд: `http://localhost:5173` (админ — `admin@clothes.shop` / `SuperSecret123`,
-  если вы включали bootstrap-администратора);
-- DevTools → Network: видно, как после 401 уходит `/api/auth/refresh` и повторяется исходный запрос.
+- `users.verification_code` хранится в открытом виде (PIN короткий и живёт 24 ч, но по идее его стоит хэшировать, как пароль). Хэширование — отдельная задача: тогда нельзя будет показывать код в логе «как есть», и fallback для локальной разработки придётся переделать.
+- Повторная отправка PIN не имеет rate-limit: защиту от «спам-повторов» и от перебора кода (например, 5 попыток на аккаунт) стоит добавить отдельно.
+- `spring.jpa.hibernate.ddl-auto=update` удобен в разработке, но для боя нужны миграции (Flyway/Liquibase): Hibernate не изменит и не удалит колонки, которые уже существуют с другими правилами.
+- Скинута только одна скидка (один промокод на заказ); суммировать несколько кодов и делать «скидка от категории» текущая модель `Order` (один процент-слепок) не умеет.
+- Загруженность фаворитов: `GET /api/favorites/ids` отдаёт все id без пагинации — при десятках тысяч избранных понадобится постраничность.

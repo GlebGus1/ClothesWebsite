@@ -30,9 +30,14 @@ export function Header() {
           </NavLink>
 
           {user && (
-            <NavLink to='/orders' className={link}>
-              Мои заказы
-            </NavLink>
+            <>
+              <NavLink to='/profile' className={link}>
+                Профиль
+              </NavLink>
+              <NavLink to='/orders' className={link}>
+                Мои заказы
+              </NavLink>
+            </>
           )}
           {user?.admin && (
             <>
@@ -41,6 +46,9 @@ export function Header() {
               </NavLink>
               <NavLink to='/admin/orders' className={link}>
                 Заказы
+              </NavLink>
+              <NavLink to='/admin/promo-codes' className={link}>
+                Промокоды
               </NavLink>
               <NavLink to='/admin/users' className={link}>
                 Пользователи
@@ -52,10 +60,12 @@ export function Header() {
         <div className='header__user'>
           {user ? (
             <>
-              <span className='header__name' title={user.email}>
+              {/* Имя — ссылка на профиль: так у пользователя есть вход в его заказы
+                  и избранное, а не только в шапке «Мои заказы» */}
+              <Link to='/profile' className='header__name' title={`${user.email} — мой профиль`}>
                 {user.firstName} {user.lastName}
                 {user.admin && <span className='badge badge--admin'>admin</span>}
-              </span>
+              </Link>
               <button type='button' className='btn btn--ghost' onClick={handleLogout}>
                 Выйти
               </button>

@@ -3,6 +3,7 @@ import {useSearchParams} from 'react-router-dom';
 import {listSizes, listTShirts} from '../api/catalog';
 import {toApiError, type ApiRequestError} from '../api/http';
 import {Pagination} from '../components/Pagination';
+import {FavoritesNotice} from '../components/FavoritesNotice';
 import {ProductCard} from '../components/ProductCard';
 import {Spinner} from '../components/Spinner';
 import {SORT_OPTIONS, type CatalogQuery, type PageResponse, type SortKey, type TShirtDto} from '../types/api';
@@ -155,6 +156,7 @@ export function CatalogPage() {
       </form>
 
       {error && <p className='alert alert--error'>{error.message}</p>}
+      <FavoritesNotice />
       {loading && <Spinner />}
 
       {!loading && page && page.content.length === 0 && (

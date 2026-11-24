@@ -24,7 +24,18 @@ public class Order {
     private String phoneNumber;
     private OrderStatus orderStatus;
 
-    /** Новый служеный столбец created_at (Hibernate сам добавит его в таблицу orders). */
+    /**
+     * Промокод, применённый к заказу. Храним строкой (snapshot), а не ссылкой на PromoCode:
+     * админ может удалить или переименовать код, а в заказе должна остаться та скидка,
+     * которую покупатель реально получил.
+     */
+    @Column(name = "promo_code", length = 40)
+    private String promoCode;
+
+    @Column(name = "discount_percent")
+    private Integer discountPercent;
+
+    /** Новый служебный столбец created_at (Hibernate сам добавит его в таблицу orders). */
     @Column(name = "created_at", updatable = false)
     private Instant createdAt;
 
@@ -62,6 +73,22 @@ public class Order {
     }
 
     public Order() {
+    }
+
+    public String getPromoCode() {
+        return promoCode;
+    }
+
+    public void setPromoCode(String promoCode) {
+        this.promoCode = promoCode;
+    }
+
+    public Integer getDiscountPercent() {
+        return discountPercent;
+    }
+
+    public void setDiscountPercent(Integer discountPercent) {
+        this.discountPercent = discountPercent;
     }
 
     public List<TShirt> getTshirts() {

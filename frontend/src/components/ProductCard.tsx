@@ -1,6 +1,7 @@
 import {useState, type MouseEvent} from 'react';
 import {Link} from 'react-router-dom';
 import {imageUrl} from '../api/http';
+import {FavoriteButton} from './FavoriteButton';
 import {useCart} from '../context/CartContext';
 import type {TShirtDto} from '../types/api';
 import {money} from '../utils/format';
@@ -13,9 +14,13 @@ import {money} from '../utils/format';
  * imageIds — id всех фото товара, причём главное фото идёт первым. Этого хватает,
  * чтобы листать галерею прямо в карточке, не дёргая API за карточкой целиком.
  *
- * Стрелки — ССЫЛКОЙ не являются: они лежат рядом со ссылкой на товар и перекрывают
- * её сверху. preventDefault + stopPropagation гарантируют, что клик по стрелке
- * не откроет страницу товара.
+ * Листание ПЛАВНОЕ: все фото стоят в один ряд (flex) внутри обрезанного окна
+ * .card__viewport, а смена фото сдвигает ряд на .card__track на 100% ширины
+ * через transition: transform 300ms ease-in-out. Никакой перерисовки и «прыжка».
+ *
+ * Стрелки и сердечко — ССЫЛКОЙ не являются: они лежат над ссылкой на товар и
+ * перекрывают её сверху. preventDefault + stopPropagation гарантируют, что клик
+ * по стрелке или сердцу не откроет страницу товара.
  */
 export function ProductCard({product}: {product: TShirtDto}) {
   const {add, has} = useCart();
@@ -24,7 +29,6 @@ export function ProductCard({product}: {product: TShirtDto}) {
 
   const gallery = galleryIds(product);
   const position = gallery.length === 0 ? 0 : Math.min(index, gallery.length - 1);
-  const shownId = gallery.length === 0 ? null : gallery[position];
 
   function shift(step: number) {
     setIndex((current) => (current + step + gallery.length) % gallery.length);
@@ -40,12 +44,27 @@ export function ProductCard({product}: {product: TShirtDto}) {
     <article className={`card ${soldOut ? 'is-muted' : ''}`}>
       <div className='card__media'>
         <Link to={`/product/${product.id}`} className='card__link'>
-          {shownId ? (
-            <img src={imageUrl(shownId)} alt={product.name} loading='lazy' />
-          ) : (
+          {gallery.length === 0 ? (
             <span className='card__placeholder'>нет фото</span>
+          ) : (
+            <div className='card__viewport'>
+              {/* сдвиг всего ряда на N * 100% и есть анимация перелистывания */}
+              <div className='card__track' style={{transform: `translateX(-${position * 100}%)`}}>
+                {gallery.map((imageId, slide) => (
+                  <div className='card__slide' key={imageId}>
+                    <img
+                      src={imageUrl(imageId)}
+                      alt={`${product.name}, фото ${slide + 1} из ${gallery.length}`}
+                      loading='lazy'
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </Link>
+
+        <FavoriteButton tshirtId={product.id} className='fav--overlay' />
 
         {gallery.length > 1 && (
           <>

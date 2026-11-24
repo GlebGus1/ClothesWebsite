@@ -169,6 +169,47 @@ class TShirtServiceTest {
     }
 
     @Test
+    void adminSeesHiddenProductInOrderToEditIt() {
+        // публичная карточка её прячет, а админ обязан открыть и отредактировать
+        when(tShirtRepository.findById(5L)).thenReturn(Optional.of(shirt(5L, true)));
+        when(imageRepository.findAllByTShirt(5L)).thenReturn(List.of());
+
+        TShirtDetailsDto dto = tShirtService.getDetailsForAdmin(5L);
+
+        assertThat(dto.id()).isEqualTo(5L);
+        assertThat(dto.disabled()).isTrue();
+    }
+
+    @Test
+    void hiddenProductIsEditableByPut() {
+        TShirt hidden = shirt(5L, true);
+        when(tShirtRepository.findById(5L)).thenReturn(Optional.of(hidden));
+        when(imageRepository.findAllByTShirt(5L)).thenReturn(List.of());
+
+        TShirtDetailsDto dto = tShirtService.update(5L, form(), List.of());
+
+        assertThat(dto.name()).isEqualTo("Новая футболка");
+        assertThat(hidden.isDisabled()).isTrue();
+    }
+
+    @Test
+    void restoreReturnsHiddenProductToSale() {
+        TShirt hidden = shirt(5L, true);
+        hidden.setAvailable(false);
+        when(tShirtRepository.findById(5L)).thenReturn(Optional.of(hidden));
+        when(imageRepository.findAllByTShirt(5L)).thenReturn(List.of());
+
+        TShirtDetailsDto dto = tShirtService.restore(5L);
+
+        // возвращаем и скрытие, и признак «в продаже» — иначе карточка вылезла бы в каталог
+        // с плашкой «продано»
+        assertThat(hidden.isDisabled()).isFalse();
+        assertThat(hidden.isAvailable()).isTrue();
+        assertThat(dto.disabled()).isFalse();
+        assertThat(dto.available()).isTrue();
+    }
+
+    @Test
     void createAssignsPreviewAndImageIds() {
         when(tShirtRepository.save(any(TShirt.class))).thenAnswer(inv -> {
             TShirt tShirt = inv.getArgument(0);

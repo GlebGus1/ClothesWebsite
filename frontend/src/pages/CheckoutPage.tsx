@@ -3,8 +3,10 @@ import {Link, useNavigate} from 'react-router-dom';
 import {createOrder} from '../api/orders';
 import {ApiRequestError, toApiError, type ApiRequestError as ApiError} from '../api/http';
 import {ApiErrorBox} from '../components/ApiErrorBox';
+import {PromoCodeBox, PromoTotals} from '../components/PromoCodeBox';
 import {useAuth} from '../context/AuthContext';
 import {useCart} from '../context/CartContext';
+import {usePromo} from '../hooks/usePromo';
 import {money} from '../utils/format';
 
 const FIELD_NAMES: Record<string, string> = {
@@ -26,6 +28,9 @@ export function CheckoutPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  const tshirtIds = items.map((item) => item.id);
+  // применённый промокод и ПЕРЕСЧИТАННЫЕ сервером суммы (см. хук usePromo)
+  const promo = usePromo(tshirtIds);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -42,7 +47,9 @@ export function CheckoutPage() {
         postOffice: String(data.get('postOffice')),
         postalCode: String(data.get('postalCode')),
         phoneNumber: String(data.get('phoneNumber')),
-        tshirtIds: items.map((item) => item.id),
+        tshirtIds,
+        // сервер сам найдёт код в БД и применит скидку; null = без кода
+        promoCode: promo.applied?.code ?? null,
       });
       clear();
       navigate(`/orders/${order.id}`, {state: {created: true}});
@@ -94,7 +101,7 @@ export function CheckoutPage() {
           </div>
 
           <button type='submit' className='btn btn--primary btn--large' disabled={busy}>
-            {busy ? 'Отправляем…' : `заказ на ${money(total)}`}
+            {busy ? 'Отправляем…' : `заказ на ${money(promo.applied?.totals.total ?? total)}`}
           </button>
         </form>
 
@@ -107,8 +114,20 @@ export function CheckoutPage() {
               </li>
             ))}
           </ul>
+
+          <PromoCodeBox
+            savedCode={promo.savedCode}
+            applied={promo.applied}
+            error={promo.error}
+            busy={promo.busy}
+            disabled={count === 0}
+            onApply={promo.applyCode}
+            onClear={promo.clearCode}
+          />
+          <PromoTotals subtotal={total} promo={promo.applied} />
+
           <p className='checkout__total'>
-            Итого: <b>{money(total)}</b>
+            Итого: <b>{money(promo.applied?.totals.total ?? total)}</b>
           </p>
           <p className='form__hint'>Итог пересчитывается на сервере по ценам из базы данных.</p>
         </aside>

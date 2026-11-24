@@ -1,20 +1,31 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
-import { login as apiLogin, me as apiMe, register as apiRegister, type Credentials, type RegisterPayload } from '../api/auth';
+import {
+  login as apiLogin,
+  me as apiMe,
+  register as apiRegister,
+  verifyEmail as apiVerifyEmail,
+  type Credentials,
+  type RegisterPayload,
+  type VerifyEmailPayload,
+} from '../api/auth';
 import { logoutRequest, onSessionLost } from '../api/http';
 import { clearTokens, getRefreshToken, saveTokens } from '../auth/tokenStorage';
-import type { AuthResponse, UserDto } from '../types/api';
+import type { AuthResponse, UserDto, VerificationStatusDto } from '../types/api';
 
 /**
  * Контекст авторизации. Хранит текущего пользователя и предоставляет
- * login/register/logout. Восстановление сессии: при загрузке страницы у нас
+ * login/register/verify-email/logout. Восстановление сессии: при загрузке страницы у нас
  * остались токены в localStorage -> просим /auth/me; если access-токен протух,
  * интерцептор в api/http.ts сам обновит пару токенов и повторит запрос.
  *
- * ВАЖНО про шапку сайта: login и register обязаны вызвать setUser. Одних токенов
+ * ВАЖНО про шапку сайта: login и verifyEmail обязаны вызвать setUser. Одних токенов
  * в localStorage недостаточно — Header (и любой компонент на useAuth) рисует имя,
  * «Мои заказы», «Админку» и «Выйти» по состоянию React. Без setUser пользователь
  * оставался бы «гостем» до перезагрузки страницы, которая заново читает сессию
  * через /auth/me.
+ *
+ * Порядок с подтверждением e-mail: register НЕ логинит (токенов в ответе нет) —
+ * он возвращает статус «ждём PIN-код». Войти получится только после verifyEmail.
  */
 
 interface AuthContextValue {
@@ -22,7 +33,10 @@ interface AuthContextValue {
   /** true, пока идёт попытка восстановить сессию (чтобы не мигал «войдите»). */
   initializing: boolean;
   login: (credentials: Credentials) => Promise<UserDto>;
-  register: (payload: RegisterPayload) => Promise<UserDto>;
+  /** Регистрация: токенов не возвращает, только статус подтверждения. */
+  register: (payload: RegisterPayload) => Promise<VerificationStatusDto>;
+  /** Ввод 6-значного PIN-кода из письма: после него пользователь считается вошедшим. */
+  verifyEmail: (payload: VerifyEmailPayload) => Promise<UserDto>;
   logout: () => Promise<void>;
 }
 
@@ -58,9 +72,20 @@ export function AuthProvider({children}: {children: ReactNode}) {
     return session;
   }, []);
 
-  /** Регистрация сразу логинит: новый пользователь видит себя в шапке. */
+  /**
+   * Регистрация только создаёт аккаунт и отправляет PIN-код: пользователем мы
+   * становимся НЕ здесь (user не трогаем), а после подтверждения e-mail.
+   */
   const register = useCallback(async (payload: RegisterPayload) => {
-    const session = applySession(await apiRegister(payload));
+    return apiRegister(payload);
+  }, []);
+
+  /**
+   * Подтверждение e-mail: бэкенд проверил PIN — значит аккаунт активирован и
+   * выдал пару токенов. Дальше ведут себя как после логина.
+   */
+  const verifyEmail = useCallback(async (payload: VerifyEmailPayload) => {
+    const session = applySession(await apiVerifyEmail(payload));
     setUser(session);
     return session;
   }, []);
@@ -94,9 +119,10 @@ export function AuthProvider({children}: {children: ReactNode}) {
       initializing,
       login,
       register,
+      verifyEmail,
       logout,
     }),
-    [user, initializing, login, register, logout],
+    [user, initializing, login, register, verifyEmail, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

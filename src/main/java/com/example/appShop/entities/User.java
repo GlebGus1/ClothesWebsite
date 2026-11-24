@@ -2,6 +2,10 @@ package com.example.appShop.entities;
 
 import jakarta.persistence.*;
 
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+
 @Entity
 @Table(name = "users")
 public class User {
@@ -19,6 +23,10 @@ public class User {
 private boolean isLogged;
     private boolean isAdmin;
     private String verificationCode;
+
+    /** Когда код был выдан: по этому времени считаем, не просрочен ли он (см. app.verification.code-ttl). */
+    @Column(name = "verification_code_sent_at")
+    private Instant verificationCodeSentAt;
 
     private boolean enabled;
 
@@ -52,6 +60,33 @@ private boolean isLogged;
 
     public void setVerificationCode(String verificationCode) {
         this.verificationCode = verificationCode;
+    }
+
+    public Instant getVerificationCodeSentAt() {
+        return verificationCodeSentAt;
+    }
+
+    public void setVerificationCodeSentAt(Instant verificationCodeSentAt) {
+        this.verificationCodeSentAt = verificationCodeSentAt;
+    }
+
+    /**
+     * Избранное («сердечко»): ManyToMany через таблицу-связку user_favorites
+     * (user_id, tshirt_id). Связь односторонняя: TShirt не знает о пользователях,
+     * иначе сериализация и ленивые загрузки начали бы «ходить» по кругу.
+     */
+    @ManyToMany(fetch = FetchType.LAZY)
+    @JoinTable(name = "user_favorites",
+            joinColumns = @JoinColumn(name = "user_id"),
+            inverseJoinColumns = @JoinColumn(name = "tshirt_id"))
+    private List<TShirt> favorites = new ArrayList<>();
+
+    public List<TShirt> getFavorites() {
+        return favorites;
+    }
+
+    public void setFavorites(List<TShirt> favorites) {
+        this.favorites = favorites;
     }
 
     public boolean isEnabled() {

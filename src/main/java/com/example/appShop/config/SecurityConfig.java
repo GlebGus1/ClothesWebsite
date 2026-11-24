@@ -64,7 +64,8 @@ public class SecurityConfig {
                         // предзапрос браузера (preflight) обязан быть доступен без токена
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/register", "/api/auth/login",
-                                "/api/auth/refresh").permitAll()
+                                "/api/auth/refresh", "/api/auth/verify-email",
+                                "/api/auth/verification-code").permitAll()
                         // каталог и картинки смотрят и гости
                         .requestMatchers(HttpMethod.GET, "/api/tshirts", "/api/tshirts/*", "/api/images/*")
                         .permitAll()
@@ -79,6 +80,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.PUT, "/api/tshirts/*").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.PATCH, "/api/tshirts/**").hasRole("ADMIN")
                         .requestMatchers(HttpMethod.DELETE, "/api/tshirts/*", "/api/images/*").hasRole("ADMIN")
+                        // избранное и промокоды — только вошедшим пользователям
+                        // (anyRequest().authenticated() закрыл бы их и сам, но явное правило
+                        // документирует намерение и не даст ошибиться при будущих правках)
+                        .requestMatchers("/api/favorites/**", "/api/promo-codes/**").authenticated()
                         // /api/auth/me, /api/orders (создание и «мои») — любой вошедший
                         .anyRequest().authenticated())
                 .authenticationManager(authenticationManager)
