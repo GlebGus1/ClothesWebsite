@@ -88,6 +88,17 @@ public class ApiExceptionHandler {
         return build(HttpStatus.PAYLOAD_TOO_LARGE, "Файл слишком большой (лимит 5 МБ на файл)");
     }
 
+    /**
+     * Превышен лимит запросов (429). Заголовок Retry-After обязателен по стандарту:
+     * по нему клиент понимает, сколько ждать, и не долбит сервер дальше.
+     */
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiError> handleTooManyRequests(TooManyRequestsException e) {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header("Retry-After", String.valueOf(e.getRetryAfterSeconds()))
+                .body(ApiError.of(HttpStatus.TOO_MANY_REQUESTS, e.getMessage(), ""));
+    }
+
     /** Нарушение уникальности/внешних ключей: например, гонка при регистрации одного e-mail. */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiError> handleIntegrity(DataIntegrityViolationException e) {

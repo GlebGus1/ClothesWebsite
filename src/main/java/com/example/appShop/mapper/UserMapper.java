@@ -15,6 +15,8 @@ public final class UserMapper {
                 user.getEmail(),
                 user.getFirstName(),
                 user.getLastName(),
-                user.isAdmin());
+                user.isAdmin(),
+                user.isEnabled(),
+                user.isBanned());
     }
 }

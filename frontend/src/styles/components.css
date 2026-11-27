@@ -457,3 +457,255 @@
   cursor: pointer;
   padding: 0 4px;
 }
+
+/* ─── Cookie consent: баннер согласия на статистику ───────────────────
+ * Приклеен к низу окна и перекрывает контент, пока человек не выбрал
+ * «принять» или «отклонить»: решение должно быть явным, поэтому кнопки
+ * обязаны быть видимыми. После выбора баннер исчезает навсегда
+ * (решение лежит в localStorage), а не «прячется до перезагрузки». */
+.consent {
+  position: fixed;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  max-width: 1128px;
+  margin: 0 auto;
+  padding: 14px 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.consent__text {
+  margin: 0;
+  flex: 1 1 340px;
+  font-size: 14px;
+}
+
+.consent__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ─── Коллекции (дропы): баннер и чипсы в каталоге ────────────────────
+ * --accent приходит из БД (цвет бейджа коллекции, проверенный регуляркой).
+ * Значение задаётся один раз на баннере/чипсе и наследуется вложенными
+ * элементами — поэтому цвет всей полки меняет одна строка в админке. */
+.collections {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.collections__banner {
+  --accent: var(--color-primary);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding: 16px 20px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+}
+
+.collections__title {
+  margin: 0 0 4px;
+  font-size: 20px;
+  color: var(--accent);
+}
+
+.collections__note {
+  margin: 0;
+  max-width: 62ch;
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+.collections__count {
+  font-size: 13px;
+  color: var(--color-muted);
+  white-space: nowrap;
+}
+
+.collections__chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.chip {
+  --accent: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.chip:hover {
+  color: var(--color-ink);
+  border-color: var(--accent);
+}
+
+/* выбранный чипс заливаем цветом самой коллекции: так видно, на какой «полке»
+   сейчас каталог, даже если экран узкий и баннер уехал выше */
+.chip.is-active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.chip__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.chip.is-active .chip__dot {
+  background: #fff;
+}
+
+.chip__count {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #f1f1ef;
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.chip.is-active .chip__count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+/* карточка товара из дропа: тонкая цветная рамка слева + бейдж с названием полки.
+   без collectionName у карточки обычный вид — ничего не «прыгает */
+.card--collection {
+  border-left: 3px solid var(--accent, var(--color-primary));
+}
+
+.card__drop {
+  --accent: var(--color-primary);
+  position: absolute;
+  left: 8px;
+  top: 8px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--color-surface);
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.product__drop {
+  --accent: var(--color-primary);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Cloudflare Turnstile: контейнер под виджет фиксированной высоты, чтобы форма
+   не «прыгала», пока скрипт капчи догружается */
+.turnstile {
+  display: grid;
+  gap: 8px;
+}
+
+.turnstile__widget {
+  min-height: 68px;
+}
+
+.turnstile__error {
+  margin: 0;
+  color: var(--color-danger);
+  font-size: 13px;
+}
+
+/* переключатель «в продаже» в таблице товаров: чекбокс остаётся настоящим
+   (доступность и клавиатура), а статус показывает бейдж рядом */
+.switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+}
+
+.switch input {
+  accent-color: var(--color-primary);
+  width: 16px;
+  height: 16px;
+}
+
+.switch input:disabled {
+  cursor: not-allowed;
+}
+
+/* ссылка-бейдж «Заказ #4»: из товара попадаем в его заказ */
+.badge--order {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  background: #e0e7ff;
+  color: #3730a3;
+  border: 1px solid #c7d2fe;
+  text-decoration: none;
+}
+
+.badge--order:hover {
+  background: #c7d2fe;
+}
+
+.badge--banned {
+  background: #fee2e2;
+  color: var(--color-danger);
+}
+
+/* цветовой кружок коллекции в админской таблице */
+.dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 8px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+/* компактные поля в тулбарах (фильтры), чтобы влезали в одну строку */
+.field--inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.field--inline > span {
+  font-size: 13px;
+  color: var(--color-muted);
+}
+
+.field--narrow {
+  max-width: 220px;
+}

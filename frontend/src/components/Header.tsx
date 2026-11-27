@@ -50,6 +50,12 @@ export function Header() {
               <NavLink to='/admin/promo-codes' className={link}>
                 Промокоды
               </NavLink>
+              <NavLink to='/admin/collections' className={link}>
+                Коллекции
+              </NavLink>
+              <NavLink to='/admin/analytics' className={link}>
+                Статистика
+              </NavLink>
               <NavLink to='/admin/users' className={link}>
                 Пользователи
               </NavLink>

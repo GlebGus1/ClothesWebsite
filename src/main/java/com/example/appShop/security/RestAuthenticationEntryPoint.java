@@ -22,6 +22,13 @@ import java.io.IOException;
 public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
 
     public static final String ATTR_JWT_ERROR = "jwtErrorMessage";
+    /**
+     * Если фильтр выставил этот атрибут — отвечаем 403, а не 401.
+     * Так работает «заблокированный аккаунт»: токен настоящий, подпись в порядке,
+     * но доступ закрыт (например «Аккаунт заблокирован»). Для 401 у фронтенда
+     * сценарий «нужен логин», для 403 — «бессмысленно логиниться заново».
+     */
+    public static final String ATTR_FORBIDDEN_MESSAGE = "jwtForbiddenMessage";
 
     private final ObjectMapper objectMapper;
 
@@ -32,14 +39,23 @@ public class RestAuthenticationEntryPoint implements AuthenticationEntryPoint {
     @Override
     public void commence(HttpServletRequest request, HttpServletResponse response,
                          AuthenticationException authException) throws IOException {
+        Object forbidden = request.getAttribute(ATTR_FORBIDDEN_MESSAGE);
+        if (forbidden != null) {
+            writeError(response, HttpStatus.FORBIDDEN, forbidden.toString(), request.getRequestURI());
+            return;
+        }
+
         Object filterMessage = request.getAttribute(ATTR_JWT_ERROR);
         String message = filterMessage == null
                 ? "Нужен заголовок Authorization: Bearer <access-токен>"
                 : filterMessage.toString();
+        writeError(response, HttpStatus.UNAUTHORIZED, message, request.getRequestURI());
+    }
 
-        response.setStatus(HttpStatus.UNAUTHORIZED.value());
+    private void writeError(HttpServletResponse response, HttpStatus status, String message, String path)
+            throws IOException {
+        response.setStatus(status.value());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        objectMapper.writeValue(response.getOutputStream(),
-                ApiError.of(HttpStatus.UNAUTHORIZED, message, request.getRequestURI()));
+        objectMapper.writeValue(response.getOutputStream(), ApiError.of(status, message, path));
     }
 }

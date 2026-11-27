@@ -42,7 +42,7 @@ class UserServiceTest {
         when(passwordEncoder.encode("secret123")).thenReturn("$2a$10$hash");
         when(userRepository.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
 
-        userService.create(new RegisterRequest("  Иван ", "Петров ", "  Ivan@Example.COM  ", "secret123"));
+        userService.create(new RegisterRequest("  Иван ", "Петров ", "  Ivan@Example.COM  ", "secret123", null));
 
         ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);
         verify(userRepository).save(saved.capture());
@@ -57,7 +57,7 @@ class UserServiceTest {
         when(passwordEncoder.encode(raw)).thenReturn("$2a$10$encoded");
         when(userRepository.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
 
-        User saved = userService.create(new RegisterRequest("Иван", "Петров", "i@e.com", raw));
+        User saved = userService.create(new RegisterRequest("Иван", "Петров", "i@e.com", raw, null));
 
         assertThat(saved.getPassword()).isEqualTo("$2a$10$encoded").isNotEqualTo(raw);
     }
@@ -67,7 +67,7 @@ class UserServiceTest {
         when(passwordEncoder.encode(org.mockito.ArgumentMatchers.anyString())).thenReturn("h");
         when(userRepository.save(org.mockito.ArgumentMatchers.any())).thenAnswer(inv -> inv.getArgument(0));
 
-        User saved = userService.create(new RegisterRequest("Иван", "Петров", "i@e.com", "secret123"));
+        User saved = userService.create(new RegisterRequest("Иван", "Петров", "i@e.com", "secret123", null));
 
         // NOT NULL-колонки старой схемы должны получать значение, иначе вставка упадёт
         assertThat(saved.isAdmin()).isFalse();

@@ -54,6 +54,9 @@ class TShirtServiceTest {
     private ImageRepository imageRepository;
     @Spy
     private TShirtMapper tShirtMapper = new TShirtMapper();
+    // Коллекции в этих тестах не участвуют: resolveOrNull(null) -> null
+    @Mock
+    private CollectionService collectionService;
 
     @InjectMocks
     private TShirtService tShirtService;
@@ -71,7 +74,7 @@ class TShirtServiceTest {
     }
 
     private static TShirtFormRequest form() {
-        return new TShirtFormRequest("  Новая футболка ", "описание", " m ", 250.0, true);
+        return new TShirtFormRequest("  Новая футболка ", "описание", " m ", 250.0, true, null);
     }
 
     /** Настоящий PNG-заголовок + «хвост»: политика проверяет содержимое, а не только MIME. */
@@ -86,7 +89,7 @@ class TShirtServiceTest {
     void searchUsesDefaultSortAndPageSize() {
         when(tShirtRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
 
-        tShirtService.search(null, null, null, 0, 0, false);
+        tShirtService.search(null, null, null, null, 0, 0, false);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         verify(tShirtRepository).findAll(any(Specification.class), pageable.capture());
@@ -99,7 +102,7 @@ class TShirtServiceTest {
     void unknownSortFallsBackToDateOfCreated() {
         when(tShirtRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
 
-        tShirtService.search(null, null, "price; drop table tshirts", 1, 1000, false);
+        tShirtService.search(null, null, null, "price; drop table tshirts", 1, 1000, false);
 
         ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
         verify(tShirtRepository).findAll(any(Specification.class), pageable.capture());
@@ -114,7 +117,7 @@ class TShirtServiceTest {
         when(tShirtRepository.findAll(any(Specification.class), any(Pageable.class)))
                 .thenReturn(new PageImpl<>(List.of(shirt(1L, false))));
 
-        assertThat(tShirtService.search("M", true, "price_asc", 0, 12, false).getContent())
+        assertThat(tShirtService.search("M", true, null, "price_asc", 0, 12, false).getContent())
                 .singleElement()
                 .satisfies(dto -> assertThat(dto.id()).isEqualTo(1L));
     }
@@ -128,7 +131,7 @@ class TShirtServiceTest {
         when(imageRepository.findImageIdsOfProducts(List.of(1L)))
                 .thenReturn(List.of(new ImageRow(1L, 10), new ImageRow(1L, 12)));
 
-        TShirtDto dto = tShirtService.search(null, null, null, 0, 12, false).getContent().get(0);
+        TShirtDto dto = tShirtService.search(null, null, null, null, 0, 12, false).getContent().get(0);
 
         // карточка в каталоге листает фото прямо в списке: id всех картинок идут в DTO,
         // а обложка — первой, чтобы нулевой слайд совпадал с главным фото
@@ -140,7 +143,7 @@ class TShirtServiceTest {
     void emptyCatalogPageDoesNotQueryImagesAtAll() {
         when(tShirtRepository.findAll(any(Specification.class), any(Pageable.class))).thenReturn(Page.empty());
 
-        tShirtService.search(null, null, null, 0, 12, false);
+        tShirtService.search(null, null, null, null, 0, 12, false);
 
         // «where id in ()» база не понимает, поэтому лишний запрос не отправляем
         verify(imageRepository, never()).findImageIdsOfProducts(anyList());

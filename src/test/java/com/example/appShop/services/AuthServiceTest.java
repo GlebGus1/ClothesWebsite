@@ -11,13 +11,17 @@ import com.example.appShop.dto.VerificationStatusDto;
 import com.example.appShop.dto.VerifyEmailRequest;
 import com.example.appShop.entities.RefreshToken;
 import com.example.appShop.entities.User;
+import com.example.appShop.exceptions.AccountBannedException;
 import com.example.appShop.exceptions.AccountNotVerifiedException;
+import com.example.appShop.exceptions.InvalidRequestException;
 import com.example.appShop.exceptions.ConflictException;
 import com.example.appShop.exceptions.InvalidCredentialsException;
 import com.example.appShop.exceptions.InvalidTokenException;
 import com.example.appShop.security.JwtTokenProvider;
 import com.example.appShop.security.RefreshTokenService;
 import com.example.appShop.security.UserPrincipal;
+import com.example.appShop.security.AccountStatusGuard;
+import com.example.appShop.repositories.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -39,6 +43,8 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.anyString;
 
 /**
  * Оркестратор авторизации. Проверяем самое дорогое: правила ротации refresh-токена,
@@ -47,6 +53,11 @@ import static org.mockito.Mockito.when;
  */
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
+
+    // Заглушка репозитория нужна только для guard'а (см. ниже): запрос «забанен ли»
+    // идёт в users, а в юнит-тесте базы нет.
+    private static final UserRepository userRepositoryMock =
+            org.mockito.Mockito.mock(UserRepository.class);
 
     @Mock
     private AuthenticationManager authenticationManager;
@@ -58,6 +69,14 @@ class AuthServiceTest {
     private RefreshTokenService refreshTokenService;
     @Mock
     private EmailVerificationService verificationService;
+    // Капчу и суточный лимит регистраций в этих тестах проверяет не AuthService:
+    // у защиты свои тесты (TurnstileServiceTest), здесь guard — заглушка.
+    @Mock
+    private RegistrationGuard registrationGuard;
+    // А вот проверку «забанен ли» подменять фейком намеренно НЕ стали: guard настоящий,
+    // поверх заглушки репозитория. Иначе мок «проглотил» бы запрет, и тест на блокировку
+    // получился бы ложно-положительным.
+    private final AccountStatusGuard accountStatusGuard = new AccountStatusGuard(userRepositoryMock);
 
     private JwtTokenProvider tokenProvider;
     private AuthService authService;
@@ -68,7 +87,8 @@ class AuthServiceTest {
                 "auth-service-test-secret-auth-service-test-secret-0123456789-abcd",
                 Duration.ofMinutes(15), Duration.ofDays(7), "appshop"));
         authService = new AuthService(authenticationManager, userService, userDetailsService,
-                refreshTokenService, tokenProvider, verificationService);
+                refreshTokenService, tokenProvider, verificationService,
+                accountStatusGuard, registrationGuard);
     }
 
     @Test
@@ -76,8 +96,8 @@ class AuthServiceTest {
         when(userService.existsByEmail("user@example.com")).thenReturn(true);
 
         assertThatExceptionOfType(ConflictException.class)
-                .isThrownBy(() -> authService.register(new RegisterRequest("Иван", "Петров",
-                        " User@example.com ", "secret123")));
+                .isThrownBy(() -> authService.register(new RegisterRequest("Иван", "Петров", " User@example.com ", "secret123", null),
+                null, "10.0.0.1"));
         verify(userService, never()).create(any());
     }
 
@@ -89,8 +109,8 @@ class AuthServiceTest {
         when(userService.create(any())).thenReturn(notConfirmed);
         when(verificationService.isVerificationRequired()).thenReturn(true);
 
-        VerificationStatusDto status = authService.register(new RegisterRequest("Иван", "Петров",
-                " User@Example.com ", "secret123"));
+        VerificationStatusDto status = authService.register(new RegisterRequest("Иван", "Петров", " User@Example.com ", "secret123", null),
+                null, "10.0.0.1");
 
         assertThat(status.requiresVerification()).isTrue();
         assertThat(status.email()).isEqualTo("user@example.com");
@@ -107,8 +127,8 @@ class AuthServiceTest {
         when(userService.create(any())).thenReturn(fresh);
         when(verificationService.isVerificationRequired()).thenReturn(false);
 
-        VerificationStatusDto status = authService.register(new RegisterRequest("Ива", "Петров",
-                " Shop@example.com ", "secret123"));
+        VerificationStatusDto status = authService.register(new RegisterRequest("Ива", "Петров", " Shop@example.com ", "secret123", null),
+                null, "10.0.0.1");
 
         assertThat(status.requiresVerification()).isFalse();
         verify(verificationService).activate(fresh);
@@ -194,6 +214,62 @@ class AuthServiceTest {
         assertThatExceptionOfType(AccountNotVerifiedException.class)
                 .isThrownBy(() -> authService.login(new AuthRequest("new@example.com", "secret123")));
         verify(refreshTokenService, never()).issue(any());
+    }
+
+    // ---------- Блокировка аккаунта («чёрный список») ----------
+
+    @Test
+    void loginOfBannedAccountIsForbiddenAndGivesNoTokens() {
+        // Пароль правильный (AuthenticationManager пропускает), но аккаунт в чёрном списке:
+        // обязаны отдать 403 и НЕ выпускать ни access, ни refresh.
+        UserPrincipal principal = new UserPrincipal(9L, "banned@example.com", "hash", false);
+        when(authenticationManager.authenticate(any()))
+                .thenReturn(new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities()));
+        User banned = user(9L, "banned@example.com", false);
+        banned.setBanned(true);
+        when(userService.getByEmailOrThrow("banned@example.com")).thenReturn(banned);
+
+        assertThatExceptionOfType(AccountBannedException.class)
+                .isThrownBy(() -> authService.login(new AuthRequest("banned@example.com", "secret123")))
+                .withMessage("Аккаунт заблокирован. Обратитесь к администратору сервиса.");
+
+        verify(refreshTokenService, never()).issue(any());
+    }
+
+    @Test
+    void refreshOfBannedAccountRevokesEveryItsSession() {
+        RefreshToken stored = new RefreshToken();
+        stored.setUserEmail("banned@example.com");
+        UserPrincipal principal = new UserPrincipal(9L, "banned@example.com", "hash", false);
+        User banned = user(9L, "banned@example.com", false);
+        banned.setBanned(true);
+
+        when(refreshTokenService.validateAndGetEntity("old-refresh")).thenReturn(stored);
+        when(userDetailsService.loadUserByUsername("banned@example.com")).thenReturn(principal);
+        when(userService.getByEmailOrThrow("banned@example.com")).thenReturn(banned);
+
+        assertThatExceptionOfType(AccountBannedException.class)
+                .isThrownBy(() -> authService.refresh(new RefreshRequest("old-refresh")));
+
+        // Запрет без отзыва остальных refresh-токенов оставил бы доступ: клиент крутил бы
+        // старую пару токенов, пока та не протухнет (до 7 суток).
+        verify(refreshTokenService).revokeAllForUser("banned@example.com");
+        verify(refreshTokenService, never()).issue(any());
+        verify(refreshTokenService, never()).markRotated(any(), anyString());
+    }
+
+    @Test
+    void registrationChecksCaptchaBeforeAnyDatabaseWrite() {
+        // Порядок важен: незачем создавать спам-аккаунт и слать письмо, если капча не пройдена.
+        doThrow(new InvalidRequestException("Капча не пройдена")).when(registrationGuard).check(any(), any());
+
+        assertThatExceptionOfType(InvalidRequestException.class)
+                .isThrownBy(() -> authService.register(
+                        new RegisterRequest("Иван", "Петров", "spammer@example.com", "secret123", "bad-token"),
+                        "bad-token", "10.0.0.1"));
+
+        verify(userService, never()).existsByEmail(anyString());
+        verify(userService, never()).create(any());
     }
 
     @Test

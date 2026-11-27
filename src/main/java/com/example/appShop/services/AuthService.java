@@ -10,11 +10,13 @@ import com.example.appShop.dto.VerificationStatusDto;
 import com.example.appShop.dto.VerifyEmailRequest;
 import com.example.appShop.entities.RefreshToken;
 import com.example.appShop.entities.User;
+import com.example.appShop.exceptions.AccountBannedException;
 import com.example.appShop.exceptions.AccountNotVerifiedException;
 import com.example.appShop.exceptions.ConflictException;
 import com.example.appShop.exceptions.InvalidCredentialsException;
 import com.example.appShop.exceptions.InvalidTokenException;
 import com.example.appShop.mapper.UserMapper;
+import com.example.appShop.security.AccountStatusGuard;
 import com.example.appShop.security.JwtTokenProvider;
 import com.example.appShop.security.RefreshTokenService;
 import com.example.appShop.security.UserPrincipal;
@@ -57,27 +59,39 @@ public class AuthService {
     private final RefreshTokenService refreshTokenService;
     private final JwtTokenProvider tokenProvider;
     private final EmailVerificationService verificationService;
+    private final AccountStatusGuard accountStatusGuard;
+    private final RegistrationGuard registrationGuard;
 
     public AuthService(AuthenticationManager authenticationManager,
                        UserService userService,
                        UserDetailsService userDetailsService,
                        RefreshTokenService refreshTokenService,
                        JwtTokenProvider tokenProvider,
-                       EmailVerificationService verificationService) {
+                       EmailVerificationService verificationService,
+                       AccountStatusGuard accountStatusGuard,
+                       RegistrationGuard registrationGuard) {
         this.authenticationManager = authenticationManager;
         this.userService = userService;
         this.userDetailsService = userDetailsService;
         this.refreshTokenService = refreshTokenService;
         this.tokenProvider = tokenProvider;
         this.verificationService = verificationService;
+        this.accountStatusGuard = accountStatusGuard;
+        this.registrationGuard = registrationGuard;
     }
 
     /**
      * Регистрация НЕ выдаёт токены: аккаунт ещё не подтверждён. Возвращаем только
      * статус — фронтенд по нему уводит пользователя на форму ввода PIN-кода.
+     *
+     * captchaToken и clientIp нужны защитному шагу (RegistrationGuard): капча Turnstile
+     * и суточный лимит регистраций с одного адреса. ПроверЯем ДО создания пользователя:
+     * незачем записывать спам-строку в таблицу users и слать письмо.
      */
     @Transactional
-    public VerificationStatusDto register(RegisterRequest request) {
+    public VerificationStatusDto register(RegisterRequest request, String captchaToken, String clientIp) {
+        registrationGuard.check(captchaToken, clientIp);
+
         String email = request.email().trim().toLowerCase();
         if (userService.existsByEmail(email)) {
             throw new ConflictException("Такой e-mail уже зарегистрирован");
@@ -124,6 +138,10 @@ public class AuthService {
     public AuthResponse login(AuthRequest request) {
         UserPrincipal principal = authenticate(request.email().trim().toLowerCase(), request.password());
         User user = userService.getByEmailOrThrow(principal.getUsername());
+        // Пароль правильный, но аккаунт в чёрном списке: вход запрещён (403),
+        // токены не выдаём. Проверяем после проверки пароля, чтобы не подсказывать
+        // существование аккаунта тем, кто ввёл неверный пароль.
+        accountStatusGuard.assertNotBanned(user);
         return issueTokens(principal, user);
     }
 
@@ -142,6 +160,13 @@ public class AuthService {
             // новый токен выпускать нельзя, старый refresh отзываем.
             refreshTokenService.revoke(request.refreshToken());
             throw new InvalidTokenException("Аккаунт не подтверждён или отключён");
+        }
+
+        if (user.isBanned()) {
+            // Забаненного не пускаем дальше и заодно чистим все его активные refresh-сессии:
+            // новый access больше не выпустить, а старый доживёт максимум 15 минут.
+            refreshTokenService.revokeAllForUser(user.getEmail());
+            throw new AccountBannedException();
         }
 
         TokenPair pair = refreshTokenService.issue(principal);

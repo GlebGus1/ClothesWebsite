@@ -7,6 +7,7 @@ import {FavoriteButton} from '../components/FavoriteButton';
 import {FavoritesNotice} from '../components/FavoritesNotice';
 import {Spinner} from '../components/Spinner';
 import {useCart} from '../context/CartContext';
+import type {CSSProperties} from 'react';
 import type {ImageDto, TShirtDetailsDto} from '../types/api';
 import {dateTime, money} from '../utils/format';
 
@@ -17,6 +18,11 @@ import {dateTime, money} from '../utils/format';
  * Порядок картинок один и тот же везде: главное фото (previewImageId) первым,
  * остальные — по id. Совпадает с каталожной карточкой, поэтому «листать фото»
  * можно и из списка, и здесь.
+ *
+ * Просмотры: сам запрос карточки отправляется с заголовком X-Visitor-Id, если
+ * посетитель согласился на статистику (см. api/catalog.ts#getTShirt) — бэкенд
+ * засчитает просмотр. Отдельного запроса «+1 просмотр» здесь нет намеренно:
+ * он дал бы двойной счёт и позволял бы накручивать счётчик из консоли браузера.
  */
 export function ProductPage() {
   const {id} = useParams<{id: string}>();
@@ -156,6 +162,14 @@ export function ProductPage() {
             {product.name}
             {!product.available && <span className='badge badge--sold'>продано</span>}
           </h1>
+          {product.collectionName && (
+            <p
+              className='product__drop'
+              style={product.collectionBadgeColor ? ({'--accent': product.collectionBadgeColor} as CSSProperties) : undefined}
+            >
+              коллекция: <b>{product.collectionName}</b>
+            </p>
+          )}
           <p className='product__price'>{money(product.price)}</p>
           <ul className='product__facts'>
             <li>
@@ -165,6 +179,12 @@ export function ProductPage() {
             <li>
               <span>Наличие</span>
               <b>{product.available ? 'в наличии' : 'продано'}</b>
+            </li>
+            <li>
+              <span>Просмотров</span>
+              {/* считаем уникальные просмотры: один посетитель — не больше одного
+                  засчитанного просмотра карточки в сутки */}
+              <b>{product.viewsCount}</b>
             </li>
             <li>
               <span>Добавлен</span>

@@ -1,8 +1,11 @@
-import {useState, type FormEvent} from 'react';
+import {useEffect, useState, type FormEvent} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
+import {captchaStatus} from '../api/auth';
 import {ApiErrorBox} from '../components/ApiErrorBox';
+import {TurnstileWidget} from '../components/TurnstileWidget';
 import {useAuth} from '../context/AuthContext';
 import {ApiRequestError, toApiError, type ApiRequestError as ApiError} from '../api/http';
+import type {CaptchaStatus} from '../types/api';
 
 const FIELD_NAMES: Record<string, string> = {
   email: 'E-mail',
@@ -24,6 +27,17 @@ export function RegisterPage() {
   const navigate = useNavigate();
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
+  // капча — не решение фронтенда: сначала спрашиваем сервер, нужна ли она
+  const [captcha, setCaptcha] = useState<CaptchaStatus | null>(null);
+  const [captchaToken, setCaptchaToken] = useState<string | null>(null);
+
+  useEffect(() => {
+    captchaStatus()
+      .then(setCaptcha)
+      // запрос статуса не критичен: если он упал, форму не блокируем —
+      // окончательное слово всё равно за сервером (он и отклонит запрос без токена)
+      .catch(() => setCaptcha(null));
+  }, []);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -37,6 +51,13 @@ export function RegisterPage() {
       return;
     }
 
+    // запрос без токена пришёл бы на сервер и получил 400, но лучше назвать
+    // причину человеку сразу, до похода в сеть
+    if (captcha?.required && !captchaToken) {
+      setError(new ApiRequestError(undefined, 0, 'Проверьте данные формы', {captcha: 'Подтвердите, что вы не робот'}));
+      return;
+    }
+
     setBusy(true);
     const email = String(data.get('email'));
     try {
@@ -45,6 +66,7 @@ export function RegisterPage() {
         lastName: String(data.get('lastName')),
         email,
         password,
+        captchaToken,
       });
       if (status.requiresVerification) {
         // передаём e-mail состоянием маршрута — форма PIN-кода не должна спрашивать его заново
@@ -55,6 +77,11 @@ export function RegisterPage() {
       }
     } catch (err) {
       setError(toApiError(err));
+      // токен капчи живёт несколько минут и используется один раз: после неудачи
+      // просим пройти её заново, иначе второй запрос уйдёт протухшим токеном
+      if (captcha?.required) {
+        setCaptchaToken(null);
+      }
     } finally {
       setBusy(false);
     }
@@ -92,6 +119,15 @@ export function RegisterPage() {
           <input type='password' name='passwordRepeat' required minLength={6} autoComplete='new-password' />
         </label>
 
+        {/* виджет появляется ТОЛЬКО если капча включена на сервере
+            (captcha.turnstile.site-key / secret-key заданы) */}
+        {captcha?.required && captcha.siteKey && (
+          <div className='field'>
+            <span>Защита от ботов</span>
+            <TurnstileWidget siteKey={captcha.siteKey} onToken={setCaptchaToken} />
+          </div>
+        )}
+
         <button type='submit' className='btn btn--primary btn--large' disabled={busy}>
           {busy ? 'Создаём аккаунт…' : 'зарегистрироваться'}
         </button>
@@ -104,6 +140,13 @@ export function RegisterPage() {
 
         <p className='form__hint'>
           Уже есть аккаунт? <Link to='/login'>войти</Link>
+        </p>
+
+        <p className='form__hint'>
+          Чтобы остановить спам-ботов, регистрация ограничена по адресу: слишком много
+          попыток с одного IP дают 429 «Слишком много запросов» — нужно подождать минуту
+          (а при очень частых попытках — сутки). Проверка идёт ДО создания аккаунта,
+          поэтому спам не попадает ни в базу, ни в почту.
         </p>
       </form>
     </section>

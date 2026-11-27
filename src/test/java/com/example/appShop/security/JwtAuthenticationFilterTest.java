@@ -1,6 +1,7 @@
 package com.example.appShop.security;
 
 import com.example.appShop.config.JwtProperties;
+import com.example.appShop.repositories.UserRepository;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.SignatureAlgorithm;
 import io.jsonwebtoken.security.Keys;
@@ -21,6 +22,11 @@ import java.util.Date;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Фильтр JWT: как заголовок превращается в аутентификацию Spring Security.
@@ -31,6 +37,7 @@ class JwtAuthenticationFilterTest {
     private static final String SECRET = "filter-test-secret-filter-test-secret-filter-test-secret-0123456789";
 
     private JwtTokenProvider tokenProvider;
+    private UserRepository userRepository;
     private JwtAuthenticationFilter filter;
     private UserPrincipal principal;
 
@@ -38,7 +45,10 @@ class JwtAuthenticationFilterTest {
     void setUp() {
         tokenProvider = new JwtTokenProvider(new JwtProperties(SECRET, Duration.ofMinutes(15),
                 Duration.ofDays(7), "appshop"));
-        filter = new JwtAuthenticationFilter(tokenProvider);
+        // Запросы «забанен ли» идут в базу, поэтому в тесте — заглушка репозитория:
+        // по умолчанию Mockito отвечает false, то есть «аккаунт обычный, не забанен».
+        userRepository = mock(UserRepository.class);
+        filter = new JwtAuthenticationFilter(tokenProvider, new AccountStatusGuard(userRepository));
         principal = new UserPrincipal(11L, "shopper@example.com", "hash", true);
     }
 
@@ -132,5 +142,34 @@ class JwtAuthenticationFilterTest {
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         assertThat(request.getAttribute(RestAuthenticationEntryPoint.ATTR_JWT_ERROR)).isNull();
+    }
+
+    /**
+     * Access-токен выпущен ДО бана (он живёт 15 минут и отменить его нельзя),
+     * а пользователя уже внесли в чёрный список. Фильтр обязан не пускать дальше
+     * и пометить запрос так, чтобы RestAuthenticationEntryPoint отдал 403,
+     * а не обычное «нужен вход» 401.
+     */
+    @Test
+    void bannedAccountGetsForbiddenMarkInsteadOfAuthentication() throws ServletException, java.io.IOException {
+        when(userRepository.existsByIdAndBannedTrue(11L)).thenReturn(true);
+        MockHttpServletRequest request = new MockHttpServletRequest();
+        request.addHeader("Authorization", "Bearer " + tokenProvider.createAccessToken(principal));
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request, new MockHttpServletResponse(), chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        assertThat(request.getAttribute(RestAuthenticationEntryPoint.ATTR_FORBIDDEN_MESSAGE))
+                .isNotNull()
+                .asString().contains("заблокирован");
+    }
+
+    @Test
+    void guestRequestDoesNotHitDatabaseForBanCheck() throws ServletException, java.io.IOException {
+        filter.doFilter(new MockHttpServletRequest(), new MockHttpServletResponse(), new MockFilterChain());
+
+        // нет токена — нет и лишнего запроса в users (иначе каталог «под ддос» бил бы по базе)
+        verify(userRepository, never()).existsByIdAndBannedTrue(anyLong());
     }
 }

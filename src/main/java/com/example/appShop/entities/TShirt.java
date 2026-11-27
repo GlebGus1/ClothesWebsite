@@ -25,6 +25,24 @@ public class TShirt {
     private LocalDateTime dateOfCreated;
     private boolean isDisabled;
 
+    /**
+     * Тематическая коллекция (дроп). Поле необязательное: null = «вне коллекции».
+     * fetch = EAGER сознательно: для связи «многие к одному» Hibernate доклеивает
+     * LEFT OUTER JOIN, а не ходит за каждой карточкой отдельно. Так карточка товара
+     * получает название и цвет бейджа бесплато, без N+1 запросов на страницу каталога.
+     */
+    @ManyToOne(fetch = FetchType.EAGER)
+    @JoinColumn(name = "collection_id")
+    private Collection collection;
+
+    /**
+     * Просмотры карточки товара. Счётчик считает НЕ запросы, а уникальные просмотры:
+     * ViewCounterService проверяет связку «посетитель + товар + дата» (см. TrackingEvent).
+     * nullable = false + columnDefinition — чтобы у новых колонок не было NULL в старых строках.
+     */
+    @Column(name = "views_count", nullable = false, columnDefinition = "bigint default 0")
+    private Long viewsCount = 0L;
+
     public boolean isDisabled() {
         return isDisabled;
     }
@@ -126,5 +144,25 @@ public class TShirt {
 
     public void setAvailable(boolean available) {
         this.available = available;
+    }
+
+    public Collection getCollection() {
+        return collection;
+    }
+
+    public void setCollection(Collection collection) {
+        this.collection = collection;
+    }
+
+    public long getViewsCount() {
+        return viewsCount == null ? 0L : viewsCount;
+    }
+
+    public void setViewsCount(Long viewsCount) {
+        this.viewsCount = viewsCount;
+    }
+
+    public void incrementViewsCount() {
+        this.viewsCount = getViewsCount() + 1;
     }
 }

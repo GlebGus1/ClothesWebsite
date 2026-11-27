@@ -21,7 +21,10 @@ public record TShirtFormRequest(
         @DecimalMin(value = "0.0", inclusive = false, message = "Цена должна быть больше нуля")
         Double price,
 
-        Boolean available
+        Boolean available,
+
+        /** Товар можно привязать к коллекции (дропу). null — «вне коллекции». */
+        Long collectionId
 ) {
     public boolean isAvailable() {
         return available == null || available;

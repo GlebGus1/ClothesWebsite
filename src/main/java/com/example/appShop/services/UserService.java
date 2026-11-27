@@ -52,6 +52,11 @@ public class UserService {
     }
 
     @Transactional
+    public User save(User user) {
+        return userRepository.save(user);
+    }
+
+    @Transactional
     public User create(RegisterRequest request) {
         User user = new User();
         user.setEmail(request.email().trim().toLowerCase());
@@ -68,7 +73,7 @@ public class UserService {
     /** Служебный метод для «создать админа при старте» (см. AdminBootstrapRunner). */
     @Transactional
     public User createAdmin(String email, String rawPassword, String firstName, String lastName) {
-        User user = create(new RegisterRequest(firstName, lastName, email, rawPassword));
+        User user = create(new RegisterRequest(firstName, lastName, email, rawPassword, null));
         user.setAdmin(true);
         user.setEnabled(true);
         return userRepository.save(user);

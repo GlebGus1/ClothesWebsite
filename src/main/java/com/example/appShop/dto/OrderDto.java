@@ -32,7 +32,10 @@ public record OrderDto(
         List<Item> items
 ) {
 
-    /** Позиция заказа: только то, что нужно интерфейсу (без картинок и полей склада). */
-    public record Item(long id, String name, String size, Double price) {
+    /**
+     * Позиция заказа. previewImageId добавлен ради админки: в таблице заказов нужно
+     * показать мини-карточку товара с превью и ссылкой на его редактирование.
+     */
+    public record Item(long id, String name, String size, Double price, Integer previewImageId) {
     }
 }

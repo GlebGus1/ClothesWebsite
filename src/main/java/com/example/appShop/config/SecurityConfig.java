@@ -1,6 +1,7 @@
 package com.example.appShop.config;
 
 import com.example.appShop.security.JwtAuthenticationFilter;
+import com.example.appShop.security.RateLimitFilter;
 import com.example.appShop.security.RestAccessDeniedHandler;
 import com.example.appShop.security.RestAuthenticationEntryPoint;
 import org.springframework.context.annotation.Bean;
@@ -13,6 +14,7 @@ import org.springframework.security.config.annotation.web.configuration.EnableWe
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -34,17 +36,20 @@ import java.util.List;
 public class SecurityConfig {
 
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final RateLimitFilter rateLimitFilter;
     private final RestAuthenticationEntryPoint authenticationEntryPoint;
     private final RestAccessDeniedHandler accessDeniedHandler;
     private final AuthenticationManager authenticationManager;
     private final CorsProperties corsProperties;
 
     public SecurityConfig(JwtAuthenticationFilter jwtAuthenticationFilter,
+                          RateLimitFilter rateLimitFilter,
                           RestAuthenticationEntryPoint authenticationEntryPoint,
                           RestAccessDeniedHandler accessDeniedHandler,
                           AuthenticationManager authenticationManager,
                           CorsProperties corsProperties) {
         this.jwtAuthenticationFilter = jwtAuthenticationFilter;
+        this.rateLimitFilter = rateLimitFilter;
         this.authenticationEntryPoint = authenticationEntryPoint;
         this.accessDeniedHandler = accessDeniedHandler;
         this.authenticationManager = authenticationManager;
@@ -65,7 +70,12 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/register", "/api/auth/login",
                                 "/api/auth/refresh", "/api/auth/verify-email",
-                                "/api/auth/verification-code").permitAll()
+                                "/api/auth/verification-code", "/api/auth/captcha-status").permitAll()
+                        // события воронки продаж шлют и гости (только с согласия на cookies,
+                        // которое проверяет фронтенд; сервер тут просто не пускает спам по лимиту)
+                        .requestMatchers("/api/track/**").permitAll()
+                        // активные коллекции (баннер и чипсы на витрине) видят и гости
+                        .requestMatchers(HttpMethod.GET, "/api/collections").permitAll()
                         // каталог и картинки смотрят и гости
                         .requestMatchers(HttpMethod.GET, "/api/tshirts", "/api/tshirts/*", "/api/images/*")
                         .permitAll()
@@ -87,6 +97,15 @@ public class SecurityConfig {
                         // /api/auth/me, /api/orders (создание и «мои») — любой вошедший
                         .anyRequest().authenticated())
                 .authenticationManager(authenticationManager)
+                // Фильтр лимитов обязан стоять САМЫМ ранним: отказ по лимиту должен
+                // случиться до разбора JWT, до обращения к БД и до дорогого BCrypt.
+                // Якорь — LogoutFilter: это самый первый «известный» фильтр Spring Security,
+                // поэтому вставка «перед ним» даёт нам начало цепочки.
+                // (На JwtAuthenticationFilter как якорь ссылаться нельзя: это наш собственный
+                // класс, а Spring Security умеет вставлять только относительно фильтров,
+                // чей порядок ему известен — иначе старт приложения падает с
+                // "does not have a registered order".)
+                .addFilterBefore(rateLimitFilter, LogoutFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -97,7 +116,10 @@ public class SecurityConfig {
         CorsConfiguration configuration = new CorsConfiguration();
         configuration.setAllowedOrigins(corsProperties.originsOrDefault());
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        // X-Visitor-Id — обезличенный ключ посетителя для статистики просмотров:
+        // фронтенд шлёт его только после согласия в cookie-баннере. Список заголовков
+        // должен включать его явно, иначе браузер не пропустит запрос (CORS).
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept", "X-Visitor-Id"));
         configuration.setExposedHeaders(List.of("Content-Disposition"));
         configuration.setMaxAge(3600L);
         // куки/учётные данные не используем: авторизация только через заголовок Authorization

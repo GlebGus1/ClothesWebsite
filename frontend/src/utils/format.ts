@@ -22,3 +22,6 @@ export const statusLabel = (status: string): string =>
   STATUS_LABELS[status as OrderStatus] ?? status;
 
 export const fileSize = (bytes: number): string => `${(bytes / 1024).toFixed(0)} КБ`;
+
+/** Проценты для аналитики: один способ форматирования на все конверсии воронки. */
+export const percent = (value: number | null | undefined): string => `${(value ?? 0).toFixed(1)}%`;

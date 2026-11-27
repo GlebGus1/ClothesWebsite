@@ -491,3 +491,282 @@
   border-top: 1px solid var(--color-line);
   padding-top: 8px;
 }
+
+/* ─── Аналитика в админке ──────────────────────────────────────────────
+ * Заголовок страницы с кнопкой «обновить» в одной строке. */
+.page__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.page__head .page__title {
+  margin-bottom: 20px;
+}
+
+/* Плитки ключевых цифр. minmax(190px, 1fr) — чтобы на телефоне карточки
+   перестроились в 1–2 колонки, а не сжимались до нечитаемых. */
+.stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.stat {
+  display: grid;
+  gap: 4px;
+  padding: 16px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+}
+
+.stat__label {
+  color: var(--color-muted);
+  font-size: 13px;
+}
+
+.stat__value {
+  font-size: 24px;
+  letter-spacing: -0.01em;
+}
+
+.stat__hint {
+  color: var(--color-muted);
+  font-size: 12px;
+}
+
+.stat--good {
+  border-left: 3px solid var(--color-success);
+}
+
+.stat--warn {
+  border-left: 3px solid var(--color-primary);
+}
+
+/* Воронка: ширина полоски считается от первого шага (визитов), проценты
+   считает сервер — здесь только разметка. */
+.funnel__steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.funnel__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.funnel__bar {
+  height: 8px;
+  margin: 6px 0 4px;
+  border-radius: 999px;
+  background: #f1f1ef;
+  overflow: hidden;
+}
+
+.funnel__fill {
+  display: block;
+  height: 100%;
+  background: var(--color-primary);
+}
+
+.funnel__conversions {
+  margin: 0;
+  font-size: 12px;
+}
+
+.funnel__note {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--color-primary-dark);
+}
+
+/* Топы (по просмотрам / по избранному) — компактный рейтинг-лист. */
+.ranked {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.ranked__row {
+  display: grid;
+  grid-template-columns: 20px 44px 1fr auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.ranked__place {
+  color: var(--color-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.ranked__thumb {
+  width: 44px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.ranked__thumb--empty {
+  background: #f1f1ef;
+}
+
+.ranked__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 14px;
+}
+
+.ranked__metric {
+  font-size: 14px;
+  white-space: nowrap;
+}
+
+.notes {
+  margin: 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--color-muted);
+}
+
+.usage__details {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.usage__details summary {
+  cursor: pointer;
+  color: var(--color-primary);
+}
+
+.usage__orders {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  min-width: 260px;
+}
+
+.warn-text {
+  color: var(--color-primary-dark);
+}
+
+/* ─── Позиции заказа мини-карточками (админ и покупатель) ───────────── */
+.order-items--cards {
+  gap: 10px;
+}
+
+.order-item {
+  display: grid;
+  grid-template-columns: 44px 1fr;
+  align-items: center;
+  gap: 10px;
+  border-bottom: 1px dashed var(--color-line);
+  padding-bottom: 8px;
+}
+
+.order-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.order-item__thumb {
+  width: 44px;
+  height: 58px;
+  object-fit: cover;
+  border-radius: 6px;
+}
+
+.order-item__thumb--empty {
+  background: #f1f1ef;
+}
+
+.order-item__text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+
+/* набор фактов в одну строку (шапка формы товара) — компактный вариант .facts */
+.facts--inline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+  margin: 0 0 20px;
+}
+
+.facts--inline li {
+  display: grid;
+  gap: 2px;
+  padding: 10px 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius);
+  border-bottom: 1px solid var(--color-line);
+}
+
+/* ─── Адаптивность таблиц админки ─────────────────────────────────────
+ * Столбцы с длинными названиями товаров и описаниями на узких экранах
+ * делали таблицу шире окна: helped перенос слов + компактный padding. */
+.table td {
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 767px) {
+  .table th,
+  .table td {
+    padding: 8px;
+    font-size: 13px;
+  }
+
+  .table__thumb {
+    width: 34px;
+    height: 46px;
+  }
+
+  .ranked__row {
+    grid-template-columns: 18px 40px 1fr;
+    row-gap: 4px;
+  }
+
+  .ranked__metric {
+    grid-column: 3;
+    font-size: 13px;
+  }
+
+  .consent {
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    padding: 12px;
+  }
+
+  .collections__banner {
+    padding: 12px 14px;
+  }
+
+  .stats {
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  }
+
+  .stat__value {
+    font-size: 20px;
+  }
+}

@@ -2,6 +2,7 @@ package com.example.appShop.rest;
 
 import com.example.appShop.dto.AuthRequest;
 import com.example.appShop.dto.AuthResponse;
+import com.example.appShop.dto.CaptchaStatusDto;
 import com.example.appShop.dto.RefreshRequest;
 import com.example.appShop.dto.RegisterRequest;
 import com.example.appShop.dto.SendCodeRequest;
@@ -9,9 +10,12 @@ import com.example.appShop.dto.UserDto;
 import com.example.appShop.dto.VerificationStatusDto;
 import com.example.appShop.dto.VerifyEmailRequest;
 import com.example.appShop.mapper.UserMapper;
+import com.example.appShop.security.ClientIpResolver;
 import com.example.appShop.security.UserPrincipal;
 import com.example.appShop.services.AuthService;
+import com.example.appShop.services.TurnstileService;
 import com.example.appShop.services.UserService;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -36,19 +40,44 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserService userService;
+    private final TurnstileService turnstileService;
+    private final ClientIpResolver clientIpResolver;
 
-    public AuthController(AuthService authService, UserService userService) {
+    public AuthController(AuthService authService,
+                          UserService userService,
+                          TurnstileService turnstileService,
+                          ClientIpResolver clientIpResolver) {
         this.authService = authService;
         this.userService = userService;
+        this.turnstileService = turnstileService;
+        this.clientIpResolver = clientIpResolver;
     }
 
     /**
      * Регистрация создаёт неподтверждённый аккаунт и отправляет PIN-код.
      * Токенов в ответе нет — их выдаст /api/auth/verify-email.
+     *
+     * clientIp отдаём защитнику регистраций (лимит «N попыток в сутки на адрес»).
+     * IP берём не наивным request.getRemoteAddr(), а через ClientIpResolver:
+     * за Cloudflare/nginx реальный адрес посетителя живёт в X-Forwarded-For, и
+     * доверять этому заголовку можно только если он реально от нашего прокси.
      */
     @PostMapping("/register")
-    public ResponseEntity<VerificationStatusDto> register(@Valid @RequestBody RegisterRequest request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(authService.register(request));
+    public ResponseEntity<VerificationStatusDto> register(@Valid @RequestBody RegisterRequest request,
+                                                         HttpServletRequest httpRequest) {
+        String clientIp = clientIpResolver.resolve(httpRequest);
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(authService.register(request, request.captchaToken(), clientIp));
+    }
+
+    /**
+     * Спрашиваем сервер, нужна ли капча, и каким публичным ключом её рисовать.
+     * Публичный ключ Turnstile всё равно виден в браузере, поэтому отдавать его
+     * без токена безопасно; зато ключ живёт в одном месте — в настройках бэкенда.
+     */
+    @GetMapping("/captcha-status")
+    public CaptchaStatusDto captchaStatus() {
+        return turnstileService.status();
     }
 
     /** Ввод PIN-кода из письма. Успех = аккаунт активирован + сразу выдаются токены. */

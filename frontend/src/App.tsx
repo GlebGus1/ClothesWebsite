@@ -12,6 +12,8 @@ import {ProductPage} from './pages/ProductPage';
 import {ProfilePage} from './pages/ProfilePage';
 import {RegisterPage} from './pages/RegisterPage';
 import {VerifyEmailPage} from './pages/VerifyEmailPage';
+import {AdminAnalyticsPage} from './pages/admin/AdminAnalyticsPage';
+import {AdminCollectionsPage} from './pages/admin/AdminCollectionsPage';
 import {AdminOrdersPage} from './pages/admin/AdminOrdersPage';
 import {AdminProductFormPage} from './pages/admin/AdminProductFormPage';
 import {AdminProductsPage} from './pages/admin/AdminProductsPage';
@@ -111,6 +113,25 @@ export function App() {
           element={
             <ProtectedRoute adminOnly>
               <AdminUsersPage />
+            </ProtectedRoute>
+          }
+        />
+        {/* Коллекции (дропы) и аналитика — новые разделы админки. Оба закрыты
+            и на фронтенде (adminOnly), и на сервере (hasRole('ADMIN')): маршрутизатор
+            в браузере — это удобство, а не защита */}
+        <Route
+          path='/admin/collections'
+          element={
+            <ProtectedRoute adminOnly>
+              <AdminCollectionsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path='/admin/analytics'
+          element={
+            <ProtectedRoute adminOnly>
+              <AdminAnalyticsPage />
             </ProtectedRoute>
           }
         />

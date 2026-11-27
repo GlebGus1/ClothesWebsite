@@ -3,10 +3,11 @@ import {Link, useLocation, useParams} from 'react-router-dom';
 import {getOrder} from '../api/orders';
 import {toApiError, type ApiRequestError} from '../api/http';
 import {ApiErrorBox} from '../components/ApiErrorBox';
+import {OrderItemsList} from '../components/OrderItemsList';
 import {OrderTotals} from '../components/OrderTotals';
 import {Spinner} from '../components/Spinner';
 import type {OrderDto} from '../types/api';
-import {dateTime, money, statusLabel} from '../utils/format';
+import {dateTime, statusLabel} from '../utils/format';
 
 /**
  * Карточка заказа. Право доступа проверяет бэкенд: пользователь видит только свои
@@ -85,15 +86,9 @@ export function OrderDetailsPage() {
 
         <div className='panel'>
           <h2>Состав</h2>
-          <ul className='order-items'>
-            {order.items.map((item) => (
-              <li key={item.id}>
-                <Link to={`/product/${item.id}`}>{item.name}</Link>
-                <span>{item.size ?? '—'}</span>
-                <b>{money(item.price)}</b>
-              </li>
-            ))}
-          </ul>
+          {/* тот же список позиции-карточкой, что и в админских заказах:
+              фото, название, размер, цена; ссылкой на редактирование товара — только для админа */}
+          <OrderItemsList items={order.items} />
           <OrderTotals order={order} />
         </div>
       </div>

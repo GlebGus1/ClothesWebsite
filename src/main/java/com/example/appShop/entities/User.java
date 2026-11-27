@@ -30,6 +30,14 @@ private boolean isLogged;
 
     private boolean enabled;
 
+    /**
+     * «Чёрный список». banned=true: вход запрещён (403 «Аккаунт заблокирован»),
+     * все refresh-токены отозваны, а любой запрос с ещё живым access-токеном
+     * отклоняет AccountStatusGuard. Не путать с enabled=false — это «e-mail не подтверждён».
+     */
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean banned;
+
     // Связь «кто сделал заказ» живёт в Order.user (@ManyToOne).
     // Дублирующее поле User.order из старого кода убрано (в БД колонка users.order_id
     // остаётся как есть — таблицы и колонки я не трогаю).
@@ -87,6 +95,14 @@ private boolean isLogged;
 
     public void setFavorites(List<TShirt> favorites) {
         this.favorites = favorites;
+    }
+
+    public boolean isBanned() {
+        return banned;
+    }
+
+    public void setBanned(boolean banned) {
+        this.banned = banned;
     }
 
     public boolean isEnabled() {

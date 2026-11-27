@@ -71,8 +71,8 @@ class FavoriteServiceTest {
         User user = userWithFavorites(shirt(1L, false), shirt(2L, false));
         when(userRepository.findById(7L)).thenReturn(Optional.of(user));
         when(tShirtService.asDtoList(anyList())).thenReturn(List.of(
-                new TShirtDto(1L, "Футболка 1", null, "M", 100.0, true, false, null, null, List.of()),
-                new TShirtDto(2L, "Футболка 2", null, "L", 200.0, true, false, null, null, List.of())));
+                new TShirtDto(1L, "Футболка 1", null, "M", 100.0, true, false, null, null, List.of(), null, null, null),
+                new TShirtDto(2L, "Футболка 2", null, "L", 200.0, true, false, null, null, List.of(), null, null, null)));
 
         List<TShirtDto> cards = service.list(shopper());
 

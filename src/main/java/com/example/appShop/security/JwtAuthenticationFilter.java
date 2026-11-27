@@ -1,5 +1,6 @@
 package com.example.appShop.security;
 
+import com.example.appShop.exceptions.AccountBannedException;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException;
@@ -29,11 +30,14 @@ import java.util.List;
  * Порядок работы:
  *   1) достали заголовок "Authorization: Bearer ...";
  *   2) проверили подпись/срок и тип токена (только ACCESS!);
- *   3) собрали UserPrincipal + роли из claims и положили в SecurityContextHolder;
- *   4) пошли дальше по цепочке. Ни одного обращения к БД и ни одной сессии.
+ *   3) проверили, не попал ли пользователь в чёрный список (один запрос по id —
+ *      иначе забаненный человек спокойно ходил бы с токеном ещё 15 минут);
+ *   4) собрали UserPrincipal + роли из claims и положили в SecurityContextHolder;
+ *   5) пошли дальше по цепочке. Сессий и куки по-прежнему нет.
  *
  * Если токен плохой — мы НЕ отдаём ошибку сами. Контекст остаётся пустым, а
- * ExceptionTranslationFilter + RestAuthenticationEntryPoint решат, что это 401.
+ * ExceptionTranslationFilter + RestAuthenticationEntryPoint решат, что это 401
+ * (или 403, если запрос помечен как «заблокированный аккаунт»).
  */
 @Component
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -42,9 +46,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private static final String BEARER = "Bearer ";
 
     private final JwtTokenProvider tokenProvider;
+    private final AccountStatusGuard accountStatusGuard;
 
-    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider) {
+    public JwtAuthenticationFilter(JwtTokenProvider tokenProvider, AccountStatusGuard accountStatusGuard) {
         this.tokenProvider = tokenProvider;
+        this.accountStatusGuard = accountStatusGuard;
     }
 
     @Override
@@ -60,6 +66,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 if (tokenProvider.tokenType(claims) != TokenType.ACCESS) {
                     //refresh-токен в качестве access — типичная ошибка клиента
                     reject(request, "В Authorization должен быть access-токен, а не refresh-токен");
+                } else if (accountStatusGuard.isBanned(userIdOf(claims))) {
+                    // Токен выпущен ДО бана (он живёт 15 минут), а доступа у пользователя уже нет.
+                    // Здесь мы НЕ бросаем исключение: оно ушло бы мимо ExceptionTranslationFilter
+                    // в 500-ю страницу контейнера. Вместо этого ставим атрибут, и
+                    // RestAuthenticationEntryPoint отдаёт честный 403 «Аккаунт заблокирован».
+                    rejectForbidden(request, AccountBannedException.MESSAGE);
                 } else {
                     SecurityContextHolder.getContext().setAuthentication(buildAuthentication(claims, request));
                 }
@@ -72,6 +84,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    private Long userIdOf(Claims claims) {
+        Number uid = claims.get(JwtTokenProvider.CLAIM_UID, Number.class);
+        return uid == null ? null : uid.longValue();
     }
 
     private UsernamePasswordAuthenticationToken buildAuthentication(Claims claims, HttpServletRequest request) {
@@ -95,6 +112,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private void reject(HttpServletRequest request, String message) {
         SecurityContextHolder.clearContext();
         request.setAttribute(RestAuthenticationEntryPoint.ATTR_JWT_ERROR, message);
+    }
+
+    private void rejectForbidden(HttpServletRequest request, String message) {
+        SecurityContextHolder.clearContext();
+        request.setAttribute(RestAuthenticationEntryPoint.ATTR_FORBIDDEN_MESSAGE, message);
     }
 
     private String extractToken(HttpServletRequest request) {

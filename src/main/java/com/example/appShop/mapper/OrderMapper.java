@@ -47,6 +47,7 @@ public class OrderMapper {
     }
 
     private OrderDto.Item toItem(TShirt tShirt) {
-        return new OrderDto.Item(tShirt.getId(), tShirt.getName(), tShirt.getSize(), tShirt.getPrice());
+        Integer preview = tShirt.getPreviewImageId() > 0 ? tShirt.getPreviewImageId() : null;
+        return new OrderDto.Item(tShirt.getId(), tShirt.getName(), tShirt.getSize(), tShirt.getPrice(), preview);
     }
 }

@@ -1,4 +1,5 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import {trackCartAdd} from '../api/tracking';
 
 /**
  * Корзина. Важно: позиция заказа = товар (размер у товара один). Бэкенд в
@@ -60,6 +61,13 @@ function readPromoCode(): string | null {
 export function CartProvider({children}: {children: ReactNode}) {
   const [items, setItems] = useState<CartItem[]>(readCart);
   const [promoCode, setPromoCodeState] = useState<string | null>(readPromoCode);
+  // id в корзине держим отдельным «зеркалом»: функция add не должна читать items из
+  // замыкания (иначе колбеса устаревала бы), а отправлять событие нужно ровно один раз
+  const currentIds = useRef<Set<number>>(new Set(readCart().map((item) => item.id)));
+
+  useEffect(() => {
+    currentIds.current = new Set(items.map((item) => item.id));
+  }, [items]);
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(items));
@@ -79,6 +87,13 @@ export function CartProvider({children}: {children: ReactNode}) {
         ? current
         : [...current, {id: product.id, name: product.name, size: product.size ?? null, price: product.price ?? null, previewImageId: product.previewImageId ?? null}],
     );
+    // Событие «добавили в корзину» — только для действительно новой позиции.
+    // Отправка асинхронная и без ожидания: воронка не должна тормозить интерфейс,
+    // а без согласия пользователя в cookie-баннере внутри trackCartAdd запроса нет.
+    if (!currentIds.current.has(product.id)) {
+      currentIds.current.add(product.id);
+      void trackCartAdd(product.id);
+    }
   }, []);
 
   const remove = useCallback((id: number) => setItems((current) => current.filter((item) => item.id !== id)), []);
@@ -86,6 +101,7 @@ export function CartProvider({children}: {children: ReactNode}) {
   // повторять его на следующий заказ — уже другой сценарий
   const clear = useCallback(() => {
     setItems([]);
+    currentIds.current = new Set();
     setPromoCodeState(null);
   }, []);
   const setPromoCode = useCallback((code: string | null) => {

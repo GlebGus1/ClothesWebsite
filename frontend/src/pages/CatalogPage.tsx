@@ -1,12 +1,21 @@
 import {useEffect, useMemo, useState} from 'react';
 import {useSearchParams} from 'react-router-dom';
+import {listCollections} from '../api/collections';
 import {listSizes, listTShirts} from '../api/catalog';
 import {toApiError, type ApiRequestError} from '../api/http';
 import {Pagination} from '../components/Pagination';
+import {CollectionsStrip} from '../components/CollectionsStrip';
 import {FavoritesNotice} from '../components/FavoritesNotice';
 import {ProductCard} from '../components/ProductCard';
 import {Spinner} from '../components/Spinner';
-import {SORT_OPTIONS, type CatalogQuery, type PageResponse, type SortKey, type TShirtDto} from '../types/api';
+import {
+  SORT_OPTIONS,
+  type CatalogQuery,
+  type CollectionDto,
+  type PageResponse,
+  type SortKey,
+  type TShirtDto,
+} from '../types/api';
 
 const PAGE_SIZE = 12;
 
@@ -31,6 +40,16 @@ function availableParam(availability: Availability): boolean | undefined {
   return availability === 'all' ? undefined : availability === 'in';
 }
 
+/** Числовой параметр URL: пусто/мусор -> null (важно: NaN улетел бы в query как 'NaN'). */
+function numberOfParam(searchParams: URLSearchParams, key: string): number | null {
+  const raw = searchParams.get(key);
+  if (!raw) {
+    return null;
+  }
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 /**
  * Каталог: фильтры (размер, наличие, сортировка) живут в query-параметрах URL.
  * Это плюс для UX: ссылку на «M + цена по возрастанию + 2-я страница» можно
@@ -40,26 +59,34 @@ export function CatalogPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const [page, setPage] = useState<PageResponse<TShirtDto> | null>(null);
   const [sizes, setSizes] = useState<string[]>([]);
+  const [collections, setCollections] = useState<CollectionDto[]>([]);
   const [error, setError] = useState<ApiRequestError | null>(null);
   const [loading, setLoading] = useState(true);
 
   const availability = availabilityOf(searchParams);
+  const collectionId = numberOfParam(searchParams, 'collectionId');
 
   const query = useMemo<CatalogQuery>(
     () => ({
       size: searchParams.get('size') ?? undefined,
       available: availableParam(availability),
+      // null -> undefined: axios всё равно не отправит параметр, но тип у запроса opts-like
+      collectionId: collectionId ?? undefined,
       sort: (searchParams.get('sort') as SortKey | null) ?? undefined,
       page: Number(searchParams.get('page') ?? 0),
       pageSize: PAGE_SIZE,
     }),
-    [searchParams, availability],
+    [searchParams, availability, collectionId],
   );
 
   useEffect(() => {
     listSizes()
       .then(setSizes)
       .catch(() => setSizes([]));
+    // коллекции — отдельный запрос: их отсутствие не должно ломать каталог
+    listCollections()
+      .then(setCollections)
+      .catch(() => setCollections([]));
   }, []);
 
   useEffect(() => {
@@ -104,6 +131,12 @@ export function CatalogPage() {
   return (
     <section className='page'>
       <h1 className='page__title'>Каталог</h1>
+
+      <CollectionsStrip
+        collections={collections}
+        activeId={collectionId}
+        onSelect={(id) => patchParams({collectionId: id === null ? '' : String(id)})}
+      />
 
       <form
         className='filters'
@@ -161,7 +194,8 @@ export function CatalogPage() {
 
       {!loading && page && page.content.length === 0 && (
         <p className='empty'>
-          По запросу ничего не найдено. Попробуйте сбросить фильтры.
+          По запросу ничего не найдено. Попробуйте сбросить фильтры
+          {collectionId !== null ? ' (в выбранной коллекции сейчас пусто)' : ''}.
           {availability === 'in' && ' Распроданные вещи скрыты — включите «все товары» или «только проданные» в фильтре «Наличие».'}
         </p>
       )}

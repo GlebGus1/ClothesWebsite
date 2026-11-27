@@ -2,6 +2,7 @@ package com.example.appShop.services;
 
 import com.example.appShop.dto.CreateOrderRequest;
 import com.example.appShop.dto.OrderDto;
+import com.example.appShop.dto.RestoreItemsDto;
 import com.example.appShop.entities.Order;
 import com.example.appShop.entities.PromoCode;
 import com.example.appShop.entities.TShirt;
@@ -18,6 +19,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -120,17 +123,97 @@ public class OrderService {
 
     @Transactional(readOnly = true)
     public Page<OrderDto> allOrders(int page, int pageSize) {
-        Pageable pageable = PageRequest.of(Math.max(page, 0), clampPageSize(pageSize));
-        return orderRepository.findAllByOrderByIdDesc(pageable).map(orderMapper::toDto);
+        return allOrders(page, pageSize, null);
     }
 
-    /** Админ меняет статус; пользователь может только посмотреть свой заказ. */
+    /**
+     * Все заказы администратора, опционально — только с указанным статусом
+     * (чипсы «Все / В обработке / В пути / Доставлен / Отменён» на странице заказов).
+     * Фильтр делаем запросом к базе, а не «получили все заказы и отфильтровали в JS»:
+     * иначе пагинация соврала бы (на странице 10 штук, а всего 10 000).
+     */
+    @Transactional(readOnly = true)
+    public Page<OrderDto> allOrders(int page, int pageSize, Order.OrderStatus status) {
+        Pageable pageable = PageRequest.of(Math.max(page, 0), clampPageSize(pageSize));
+        Page<Order> found = status == null
+                ? orderRepository.findAllByOrderByIdDesc(pageable)
+                : orderRepository.findAllByOrderStatusOrderByIdDesc(status, pageable);
+        return found.map(orderMapper::toDto);
+    }
+
+    /**
+     * Админ меняет статус; пользователь может только посмотреть свой заказ.
+     *
+     * ВАЖНО (правило магазина): смена статуса на CANCELED НЕ возвращает товары в продажу
+     * автоматически. Причина: отменённый заказ часто означает «товар физически поехал и его
+     * надо проверять» (брак, ошибка склада, возврат позже). Автоматический возврат
+     * приводил бы к двойной продаже: позиция снова появлялась в каталоге, и её покупал
+     * второй клиент, пока первый ещё думал, вернёт ли посылку.
+     *
+     * Поэтому возврат позиции в продаже — отдельное осознанное действие админа
+     * (see restoreItemsToSale): кнопка + подтверждение в окне.
+     */
     @Transactional
     public OrderDto updateStatus(long orderId, Order.OrderStatus status) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new NotFoundException("Заказ", orderId));
         order.setOrderStatus(status);
         return orderMapper.toDto(order);
+    }
+
+    /**
+     * Ручной «вернуть товары в продажу» из ОТМЕНЁННОГО заказа.
+     *
+     * Пропускаем позиции, которые нельзя честно вернуть в продажу:
+     *  - снятые с продажи (is_disabled=true) — товар вообще выведен из каталога;
+     *  - уже проданные в ДРУГОМ не отменённом заказе — иначе одна и та же футболка
+     *    (она в одном экземпляре) оказалась бы в продаже дважды.
+     * Пропущенные позиции возвращаем в ответе списком названий, чтобы админ видел,
+     * почему щелчок «не сработал» для конкретной позиции.
+     */
+    @Transactional
+    public RestoreItemsDto restoreItemsToSale(long orderId) {
+        Order order = orderRepository.findById(orderId)
+                .orElseThrow(() -> new NotFoundException("Заказ", orderId));
+
+        if (order.getOrderStatus() != Order.OrderStatus.CANCELED) {
+            throw new InvalidRequestException(
+                    "Вернуть товары в продажу можно только из отменённого заказа (сейчас статус: "
+                            + order.getOrderStatus() + ")");
+        }
+
+        List<TShirt> items = order.getTshirts() == null ? List.of() : order.getTshirts();
+        if (items.isEmpty()) {
+            return new RestoreItemsDto(orderMapper.toDto(order), 0, List.of());
+        }
+
+        List<Long> itemIds = items.stream().map(TShirt::getId).toList();
+        Set<Long> soldElsewhere = new HashSet<>(orderRepository.findProductIdsSoldInOtherOrders(
+                itemIds, orderId, Order.OrderStatus.CANCELED));
+
+        int restored = 0;
+        List<String> skipped = new ArrayList<>();
+        List<TShirt> toSave = new ArrayList<>();
+
+        for (TShirt item : items) {
+            if (item.isDisabled()) {
+                skipped.add(item.getName() + " (товар снят с продажи)");
+                continue;
+            }
+            if (soldElsewhere.contains(item.getId())) {
+                skipped.add(item.getName() + " (уже продан в другом заказе)");
+                continue;
+            }
+            if (item.isAvailable()) {
+                continue; // и так в продаже — не трогаем
+            }
+            item.setAvailable(true);
+            toSave.add(item);
+            restored++;
+        }
+
+        tShirtRepository.saveAll(toSave);
+        return new RestoreItemsDto(orderMapper.toDto(order), restored, skipped);
     }
 
     @Transactional(readOnly = true)

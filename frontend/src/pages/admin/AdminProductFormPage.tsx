@@ -1,10 +1,17 @@
 import {useEffect, useRef, useState, type FormEvent} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
-import {deleteImage, getTShirtForAdmin, restoreTShirt, saveTShirt, setPreviewImage} from '../../api/catalog';
+import {
+  deleteImage,
+  getTShirtForAdmin,
+  restoreTShirt,
+  saveTShirt,
+  setPreviewImage,
+} from '../../api/adminProducts';
+import {adminCollections} from '../../api/collections';
 import {ApiRequestError, imageUrl, toApiError, type ApiRequestError as ApiError} from '../../api/http';
 import {ApiErrorBox} from '../../components/ApiErrorBox';
 import {Spinner} from '../../components/Spinner';
-import type {TShirtDetailsDto, TShirtForm} from '../../types/api';
+import type {CollectionDto, TShirtDetailsDto, TShirtForm} from '../../types/api';
 import {fileSize} from '../../utils/format';
 
 const MAX_FILES = 5;
@@ -43,11 +50,18 @@ export function AdminProductFormPage() {
   const fileInput = useRef<HTMLInputElement>(null);
 
   const [product, setProduct] = useState<TShirtDetailsDto | null>(null);
+  const [collections, setCollections] = useState<CollectionDto[]>([]);
   const [files, setFiles] = useState<File[]>([]);
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   /** id картинки, для которой сейчас идёт запрос (сделать главной / удалить). */
   const [busyImageId, setBusyImageId] = useState<number | null>(null);
+
+  useEffect(() => {
+    // справочник полок для селекта: берём админский список, чтобы в форме было видно
+    // и выключенную коллекцию (её нельзя «терять» у товара только из-за того, что полку скрыли)
+    adminCollections().then(setCollections).catch(() => setCollections([]));
+  }, []);
 
   useEffect(() => {
     if (productId === null) {
@@ -89,6 +103,9 @@ export function AdminProductFormPage() {
       size: String(data.get('size') ?? ''),
       price: Number(data.get('price')),
       available: data.get('available') !== null,
+      // пустая строка в select = «без коллекции»; 0 тоже считаем пустым,
+      // потому что у бэкенда внешний ключ nullable
+      collectionId: Number(data.get('collectionId')) || null,
     };
 
     setBusy(true);
@@ -172,6 +189,24 @@ export function AdminProductFormPage() {
       </h1>
       <ApiErrorBox error={error} fieldNames={FIELD_NAMES} />
 
+      {product && (
+        <ul className='facts facts--inline'>
+          <li>
+            <span>Просмотров карточки</span>
+            <b>{product.viewsCount}</b>
+          </li>          <li>
+            <span>Коллекция</span>
+            <b>
+              {product.collectionId ? (
+                <Link to={`/admin/products?collection=${product.collectionId}`}>{product.collectionName}</Link>
+              ) : (
+                'без коллекции'
+              )}
+            </b>
+          </li>
+        </ul>
+      )}
+
       {product?.disabled && (
         <div className='toolbar'>
           <button type='button' className='btn btn--primary' onClick={handleRestore} disabled={busy}>
@@ -205,6 +240,23 @@ export function AdminProductFormPage() {
             <input name='price' type='number' min='0.01' step='0.01' required defaultValue={product?.price ?? ''} />
           </label>
         </div>
+
+        <label className='field'>
+          <span>Коллекция (дроп) — можно оставить пустым</span>
+          <select name='collectionId' defaultValue={product?.collectionId ?? ''}>
+            <option value=''>без коллекции</option>
+            {collections.map((collection) => (
+              <option key={collection.id} value={collection.id}>
+                {collection.name}
+                {collection.active ? '' : ' (скрыта)'}
+              </option>
+            ))}
+          </select>
+          <span className='form__hint'>
+            Коллекция добавляет карточке товара бейдж и цветную рамку в каталоге. Удаление
+            коллекции не удаляет товар — он просто перестаёт относиться к дропу.
+          </span>
+        </label>
 
         <label className='checkbox'>
           <input type='checkbox' name='available' defaultChecked={product?.available ?? true} />

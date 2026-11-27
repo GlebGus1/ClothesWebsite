@@ -40,22 +40,25 @@ public class TShirtService {
     private final TShirtRepository tShirtRepository;
     private final ImageRepository imageRepository;
     private final TShirtMapper tShirtMapper;
+    private final CollectionService collectionService;
 
     public TShirtService(TShirtRepository tShirtRepository,
                          ImageRepository imageRepository,
-                         TShirtMapper tShirtMapper) {
+                         TShirtMapper tShirtMapper,
+                         CollectionService collectionService) {
         this.tShirtRepository = tShirtRepository;
         this.imageRepository = imageRepository;
         this.tShirtMapper = tShirtMapper;
+        this.collectionService = collectionService;
     }
 
     @Transactional(readOnly = true)
-    public Page<TShirtDto> search(String size, Boolean available, String sort,
+    public Page<TShirtDto> search(String size, Boolean available, Long collectionId, String sort,
                                   int page, int pageSize, boolean includeDisabled) {
         Pageable pageable = PageRequest.of(Math.max(page, 0), clampPageSize(pageSize),
                 TShirtSort.from(sort).toSort());
         Page<TShirt> found = tShirtRepository
-                .findAll(TShirtSpecifications.byFilters(size, available, includeDisabled), pageable);
+                .findAll(TShirtSpecifications.byFilters(size, available, collectionId, includeDisabled), pageable);
 
         Map<Long, List<Long>> galleries = imageIdsByProduct(found.getContent());
         return found.map(tShirt -> tShirtMapper.toDto(tShirt, galleries.getOrDefault(tShirt.getId(), List.of())));
@@ -240,6 +243,9 @@ public class TShirtService {
         tShirt.setSize(form.size().trim().toUpperCase());
         tShirt.setPrice(form.price());
         tShirt.setAvailable(form.isAvailable());
+        // Коллекция необязательна: null = «снять товар с полки». Если админ прислал id,
+        // которого нет в таблице collections, получим 404 (а не «молча» сохраним без полки).
+        tShirt.setCollection(collectionService.resolveOrNull(form.collectionId()));
     }
 
     private List<Image> attachImages(TShirt tShirt, List<MultipartFile> files) {

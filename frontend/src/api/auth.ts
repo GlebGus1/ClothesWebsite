@@ -1,5 +1,5 @@
 import {postJson, getJson} from './http';
-import type {AuthResponse, UserDto, VerificationStatusDto} from '../types/api';
+import type {AuthResponse, CaptchaStatus, UserDto, VerificationStatusDto} from '../types/api';
 
 export interface Credentials {
   email: string;
@@ -9,6 +9,11 @@ export interface Credentials {
 export interface RegisterPayload extends Credentials {
   firstName: string;
   lastName: string;
+  /**
+   * Токен Cloudflare Turnstile. Обязателен только если капча включена на сервере
+   * (см. captchaStatus()): источник правды — настройки бэкенда, а не фронтенд.
+   */
+  captchaToken?: string | null;
 }
 
 export interface VerifyEmailPayload {
@@ -18,6 +23,13 @@ export interface VerifyEmailPayload {
 }
 
 export const login = (payload: Credentials): Promise<AuthResponse> => postJson<AuthResponse>('/auth/login', payload);
+
+/**
+ * Нужна ли капча на форме регистрации. Отвечает сервер: если Turnstile не настроен
+ * (локальная разработка, CI), required=false — и виджет в форме не появляется,
+ * а ключ siteKey фронтенд не хранит у себя вообще.
+ */
+export const captchaStatus = (): Promise<CaptchaStatus> => getJson<CaptchaStatus>('/auth/captcha-status');
 
 /**
  * Регистрация: аккаунт создаётся НЕподтверждённым, токенов в ответе нет.

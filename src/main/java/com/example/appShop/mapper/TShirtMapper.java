@@ -1,9 +1,10 @@
 package com.example.appShop.mapper;
 
+import com.example.appShop.entities.Collection;
+import com.example.appShop.entities.Image;
 import com.example.appShop.dto.ImageDto;
 import com.example.appShop.dto.TShirtDetailsDto;
 import com.example.appShop.dto.TShirtDto;
-import com.example.appShop.entities.Image;
 import com.example.appShop.entities.TShirt;
 import org.springframework.stereotype.Component;
 
@@ -27,11 +28,13 @@ public class TShirtMapper {
                 tShirt.isDisabled(),
                 tShirt.getDateOfCreated(),
                 previewIdOrNull(tShirt),
-                imageIds == null ? List.of() : List.copyOf(imageIds));
+                imageIds == null ? List.of() : List.copyOf(imageIds),
+                collectionIdOf(tShirt),
+                collectionNameOf(tShirt),
+                collectionColorOf(tShirt));
     }
 
     public TShirtDetailsDto toDetailsDto(TShirt tShirt, List<Image> images) {
-        List<Image> gallery = images == null ? List.of() : images;
         return new TShirtDetailsDto(
                 tShirt.getId(),
                 tShirt.getName(),
@@ -42,15 +45,19 @@ public class TShirtMapper {
                 tShirt.isDisabled(),
                 tShirt.getDateOfCreated(),
                 previewIdOrNull(tShirt),
-                gallery.stream().map(image -> toImageDto(image, tShirt.getPreviewImageId())).toList());
+                toImageDtos(tShirt, images),
+                collectionIdOf(tShirt),
+                collectionNameOf(tShirt),
+                collectionColorOf(tShirt),
+                tShirt.getViewsCount());
     }
 
-    /**
-     * Флаг «это главное фото» НЕ берём из колонки images.is_preview_image — она осталась
-     * от старой Thymeleaf-версии и никем не обновляется. Единственный источник истины —
-     * tshirts.preview_image_id: два флага неизбежно «разъезжаются», и админка начинает
-     * подсвечивать не ту картинку.
-     */
+    /** Список картинок в формат DTO (флаг «это обложка» считаем по tshirts.preview_image_id). */
+    public List<ImageDto> toImageDtos(TShirt tShirt, List<Image> images) {
+        List<Image> gallery = images == null ? List.of() : images;
+        return gallery.stream().map(image -> toImageDto(image, tShirt.getPreviewImageId())).toList();
+    }
+
     public ImageDto toImageDto(Image image, int previewImageId) {
         long tShirtId = image.gettShirt() == null ? 0L : image.gettShirt().getId();
         return new ImageDto(
@@ -66,5 +73,26 @@ public class TShirtMapper {
     /** 0 в БД означает «обложка не выбрана», наружу отдаём null, чтобы фронтенд не рисовал /api/images/0. */
     private Integer previewIdOrNull(TShirt tShirt) {
         return tShirt.getPreviewImageId() > 0 ? tShirt.getPreviewImageId() : null;
+    }
+
+    /**
+     * Поле collection отдаём null, если товар не принадлежит ни одной коллекции (дропу).
+     * Свойства читаем без скрытых походов в базу: связь many-to-one помечена EAGER
+     * (см. entities/TShirt), поэтому Hibernate подтягивает полку тем же запросом,
+     * что и сам товар.
+     */
+    private Long collectionIdOf(TShirt tShirt) {
+        Collection collection = tShirt.getCollection();
+        return collection == null ? null : collection.getId();
+    }
+
+    private String collectionNameOf(TShirt tShirt) {
+        Collection collection = tShirt.getCollection();
+        return collection == null ? null : collection.getName();
+    }
+
+    private String collectionColorOf(TShirt tShirt) {
+        Collection collection = tShirt.getCollection();
+        return collection == null ? null : collection.getBadgeColor();
     }
 }

@@ -2,6 +2,7 @@ package com.example.appShop.services;
 
 import com.example.appShop.dto.CreateOrderRequest;
 import com.example.appShop.dto.OrderDto;
+import com.example.appShop.dto.RestoreItemsDto;
 import com.example.appShop.entities.Order;
 import com.example.appShop.entities.PromoCode;
 import com.example.appShop.entities.TShirt;
@@ -280,6 +281,86 @@ class OrderServiceTest {
 
         assertThatExceptionOfType(NotFoundException.class)
                 .isThrownBy(() -> orderService.updateStatus(404L, Order.OrderStatus.DELIVERED));
+    }
+
+    @Test
+    void cancellingOrderDoesNotReturnProductsToSaleAutomatically() {
+        TShirt item = shirt(1L, false, false); // после заказа она уже снята с продажи
+        Order order = order(9L, user(), Order.OrderStatus.PROCESSING);
+        order.setTshirts(List.of(item));
+        when(orderRepository.findById(9L)).thenReturn(Optional.of(order));
+
+        OrderDto dto = orderService.updateStatus(9L, Order.OrderStatus.CANCELED);
+
+        assertThat(dto.status()).isEqualTo(Order.OrderStatus.CANCELED);
+        // ключевое правило магазина: отмена = только статус. Товар возвращается в продажу
+        // вручную (кнопка + подтверждение), иначе одна и та же вещь может уехать дважды
+        assertThat(item.isAvailable()).isFalse();
+        verify(tShirtRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void restoreItemsReturnsToSaleOnlyHonestCandidates() {
+        TShirt free = shirt(1L, false, false);              // вернём в продажу
+        TShirt soldInAnotherOrder = shirt(2L, false, false); // уже уехал в другом заказе
+        TShirt removedFromCatalog = shirt(3L, false, true);  // снят с продажи админом
+        TShirt stillOnSale = shirt(4L, true, false);         // и так в продаже
+        Order order = order(9L, user(), Order.OrderStatus.CANCELED);
+        order.setTshirts(List.of(free, soldInAnotherOrder, removedFromCatalog, stillOnSale));
+        when(orderRepository.findById(9L)).thenReturn(Optional.of(order));
+        when(orderRepository.findProductIdsSoldInOtherOrders(anyList(), eq(9L), eq(Order.OrderStatus.CANCELED)))
+                .thenReturn(List.of(2L));
+
+        RestoreItemsDto result = orderService.restoreItemsToSale(9L);
+
+        assertThat(free.isAvailable()).isTrue();
+        assertThat(soldInAnotherOrder.isAvailable()).isFalse();
+        assertThat(removedFromCatalog.isAvailable()).isFalse();
+        assertThat(stillOnSale.isAvailable()).isTrue();
+
+        assertThat(result.restoredCount()).isEqualTo(1);
+        verify(tShirtRepository).saveAll(List.of(free));
+        // админ обязан видеть ПРИЧИНУ, почему позиция не вернулась
+        assertThat(result.skippedNames()).containsExactly(
+                "Футболка 2 (уже продан в другом заказе)",
+                "Футболка 3 (товар снят с продажи)");
+    }
+
+    @Test
+    void restoreItemsIsAllowedOnlyForCancelledOrders() {
+        Order order = order(9L, user(), Order.OrderStatus.DELIVERED);
+        when(orderRepository.findById(9L)).thenReturn(Optional.of(order));
+
+        assertThatExceptionOfType(InvalidRequestException.class)
+                .isThrownBy(() -> orderService.restoreItemsToSale(9L))
+                .withMessageContaining("DELIVERED");
+
+        verify(tShirtRepository, never()).saveAll(any());
+    }
+
+    @Test
+    void adminOrdersCanBeFilteredByStatusInDatabase() {
+        when(orderRepository.findAllByOrderStatusOrderByIdDesc(eq(Order.OrderStatus.CANCELED), any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(order(9L, user(), Order.OrderStatus.CANCELED))));
+
+        Page<OrderDto> page = orderService.allOrders(0, 10, Order.OrderStatus.CANCELED);
+
+        // фильтр делает база, а не «выборка всех заказов + фильтр в Java»
+        verify(orderRepository, never()).findAllByOrderByIdDesc(any(Pageable.class));
+        assertThat(page.getContent()).singleElement()
+                .satisfies(dto -> assertThat(dto.status()).isEqualTo(Order.OrderStatus.CANCELED));
+    }
+
+    @Test
+    void adminOrdersWithoutStatusFilterReturnEverything() {
+        when(orderRepository.findAllByOrderByIdDesc(any(Pageable.class)))
+                .thenReturn(new PageImpl<>(List.of(order(9L, user(), Order.OrderStatus.PROCESSING))));
+
+        Page<OrderDto> page = orderService.allOrders(0, 10, null);
+
+        verify(orderRepository).findAllByOrderByIdDesc(any(Pageable.class));
+        verify(orderRepository, never()).findAllByOrderStatusOrderByIdDesc(any(), any(Pageable.class));
+        assertThat(page.getContent()).hasSize(1);
     }
 
     @Test
